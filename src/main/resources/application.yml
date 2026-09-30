@@ -29,10 +29,6 @@ mybatis:
     map-underscore-to-camel-case: true
     default-statement-timeout: 30
 
-springdoc:
-  swagger-ui:
-    path: /swagger-ui/index.html
-
 ses:
   max-send-rate: 1
 
