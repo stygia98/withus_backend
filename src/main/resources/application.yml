@@ -13,6 +13,8 @@ spring:
       connection-init-sql: SET TIME ZONE 'Asia/Seoul'
   flyway:
     locations: classpath:db/migration
+    # 담당별 번호 대역(V10~, V20~ ...)을 쓰므로 낮은 번호가 나중에 추가돼도 적용한다 (docs/workflow-git.md)
+    out-of-order: true
   jackson:
     time-zone: Asia/Seoul
   task:
