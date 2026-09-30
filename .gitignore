@@ -31,3 +31,6 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### 로컬 업로드 파일 (withus.storage.local-path) ###
+uploads/
