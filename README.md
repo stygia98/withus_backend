@@ -14,6 +14,30 @@
 - Mailpit: http://localhost:8025
 - `local` 프로필은 `../infra/.env` 를 읽는다. 없으면 OS 환경변수 `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` 를 쓴다.
 
+## 팀원용 사용법
+
+**로그인해서 API 테스트하기 (Swagger)**
+1. `GET /api/v1/auth/csrf` 실행 → `XSRF-TOKEN` 쿠키 발급 (Swagger 가 이후 POST 에 헤더를 자동으로 붙인다)
+2. `POST /api/v1/auth/login` 에 `infra/.env` 의 `OWNER_EMAIL` / `OWNER_PASSWORD` 입력
+3. 이후 모든 API 가 쿠키로 인증된다. Access 30분 만료 시 `POST /api/v1/auth/refresh`
+
+**컨트롤러 작성 규칙**
+```java
+@PreAuthorize("hasAnyRole('OWNER','MANAGER')")            // 권한표: PRD 3장
+@PostMapping("/api/v1/segments")
+public ApiResponse<SegmentResponse> create(@Valid @RequestBody SegmentRequest req,
+        @AuthenticationPrincipal AuthMember me) {          // me.memberId() → created_by
+    return ApiResponse.ok(segmentService.create(req, me.memberId()));
+}
+```
+- 응답은 항상 `ApiResponse.ok(data)`, 목록은 `ApiResponse.ok(PageResponse.of(content, page, size, total))`
+- 오류는 도메인별 `ErrorCode` enum 을 만들어 `throw new BusinessException(SegmentErrorCode.SEGMENT_INVALID_RULE)` (예시: `auth.domain.AuthErrorCode`). 새 코드는 `docs/api/API_SPEC.md` 12장에도 추가
+- `@Valid` 실패는 자동으로 400 `COMMON_INVALID_INPUT` + 필드별 `details`
+- 공개 경로(`/t/**`, `/api/v1/public/**`, `/api/v1/unsubscribe/one-click/**`, `/api/webhooks/**`)는 인증·CSRF 없이 열려 있다. 그 외 경로를 공개해야 하면 `auth.security.SecurityConfig` 변경 → PL 리뷰
+
+**테스트**
+- `@SpringBootTest @AutoConfigureMockMvc @Transactional` + 로컬 Docker DB (예시: `src/test/java/com/withus/auth/AuthFlowTest.java`)
+
 ## 버전 메모
 MyBatis 스타터(4.0.1)가 Spring Boot 4.0.x 까지만 지원해 4.0.8 을 쓴다. 4.1 지원 버전이 나오면 올린다.
 
