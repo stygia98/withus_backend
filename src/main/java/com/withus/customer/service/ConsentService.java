@@ -4,7 +4,7 @@ import com.withus.common.domain.Channel;
 
 /**
  * 구간 간 연결 인터페이스 (PRD 10.1 "수신동의 확인") — 제공: 팀원1, 호출: 팀원2(적재·발송 직전 재확인)
- * 시그니처 변경은 W1 합의 후 PL 리뷰로만 한다.
+ * 시그니처 확정(2026-09-30). 변경은 PL 리뷰로만 한다.
  */
 public interface ConsentService {
 

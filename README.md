@@ -35,13 +35,17 @@ public ApiResponse<SegmentResponse> create(@Valid @RequestBody SegmentRequest re
 - `@Valid` 실패는 자동으로 400 `COMMON_INVALID_INPUT` + 필드별 `details`
 - 공개 경로(`/t/**`, `/api/v1/public/**`, `/api/v1/unsubscribe/one-click/**`, `/api/webhooks/**`)는 인증·CSRF 없이 열려 있다. 그 외 경로를 공개해야 하면 `auth.security.SecurityConfig` 변경 → PL 리뷰
 
+**Lombok**
+- `@Getter`, `@RequiredArgsConstructor`, `@Builder` 만 허용. `@Data`·`@Setter`·`@AllArgsConstructor` 등은 `lombok.config` 때문에 컴파일 오류가 난다
+- MyBatis 결과 객체는 setter 없이도 필드에 값을 넣는다
+
 **테스트**
 - `@SpringBootTest @AutoConfigureMockMvc @Transactional` + 로컬 Docker DB (예시: `src/test/java/com/withus/auth/AuthFlowTest.java`)
 
 ## 버전 메모
 MyBatis 스타터(4.0.1)가 Spring Boot 4.0.x 까지만 지원해 4.0.8 을 쓴다. 4.1 지원 버전이 나오면 올린다.
 
-## 구간 간 인터페이스 (PRD 10.1, 시그니처 변경은 PL 리뷰)
+## 구간 간 인터페이스 (PRD 10.1, 2026-09-30 확정 — 시그니처 변경은 PL 리뷰)
 | 인터페이스 | 제공 | 호출 |
 |---|---|---|
 | `segment.service.SegmentService` | 팀원1 | 팀원2 |
