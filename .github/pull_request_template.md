@@ -7,7 +7,7 @@
 
 ## 테스트 결과
 - [ ] backend: `./mvnw test` 통과
-- [ ] frontend: `npm run lint && npm run build` 통과
+- [ ] frontend: `npm run format:check && npm run lint && npm run build` 통과
 - 확인한 PRD 10.3 완료 기준:
 
 ## 다른 구간 영향
@@ -20,5 +20,5 @@
 - [ ] 이미 적용된 Flyway 파일을 수정하지 않았고, 번호가 내 대역과 겹치지 않음
 - [ ] 비밀값·API 키를 커밋하지 않음
 - [ ] 스키마·API 계약 변경 시 `docs/` ERD·API 문서를 함께 갱신
-- [ ] roadmap 체크박스 갱신
+- [ ] 위 "관련 문서"에 roadmap 항목을 적음 (체크는 PL이 병합 시)
 - [ ] PR 대상 브랜치가 `dev`

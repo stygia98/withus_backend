@@ -5,7 +5,7 @@ import java.util.Map;
 /**
  * 구간 간 연결 인터페이스 — 제공: 팀원3(전환), 호출: 팀원2(발송 직전 렌더링·미리보기)
  * 치환자 {{name}}, {{email}}, {{region}}, {{totalPurchase}}, {{couponUrl}} 와 기본값 문법 {{name|고객}} (PRD F-04)
- * 시그니처 확정(2026-09-30). 변경은 PL 리뷰로만 한다.
+ * 시그니처 확정. 변경은 PL 리뷰로만 한다.
  */
 public interface PlaceholderRenderer {
 

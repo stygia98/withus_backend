@@ -12,7 +12,7 @@
 ```
 - Swagger UI: http://localhost:8080/swagger-ui/index.html
 - Mailpit: http://localhost:8025
-- `local` 프로필은 `../infra/.env` 를 읽는다. 없으면 OS 환경변수 `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` 를 쓴다.
+- `local` 프로필은 `../infra/.env` 를 읽는다. 없으면 OS 환경변수 `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`, `JWT_SECRET`(32자 이상, 필수), `OWNER_EMAIL`, `OWNER_PASSWORD` 를 쓴다.
 
 ## 팀원용 사용법
 
@@ -33,6 +33,7 @@ public ApiResponse<SegmentResponse> create(@Valid @RequestBody SegmentRequest re
 - 응답은 항상 `ApiResponse.ok(data)`, 목록은 `ApiResponse.ok(PageResponse.of(content, page, size, total))`
 - 오류는 도메인별 `ErrorCode` enum 을 만들어 `throw new BusinessException(SegmentErrorCode.SEGMENT_INVALID_RULE)` (예시: `auth.domain.AuthErrorCode`). 새 코드는 `docs/api/API_SPEC.md` 12장에도 추가
 - `@Valid` 실패는 자동으로 400 `COMMON_INVALID_INPUT` + 필드별 `details`
+- `common.domain.Channel`(EMAIL/SMS) 같은 공통 타입은 `common` 패키지 것을 쓴다
 - 공개 경로(`/t/**`, `/api/v1/public/**`, `/api/v1/unsubscribe/one-click/**`, `/api/webhooks/**`)는 인증·CSRF 없이 열려 있다. 그 외 경로를 공개해야 하면 `auth.security.SecurityConfig` 변경 → PL 리뷰
 
 **Lombok**
@@ -45,7 +46,7 @@ public ApiResponse<SegmentResponse> create(@Valid @RequestBody SegmentRequest re
 ## 버전 메모
 MyBatis 스타터(4.0.1)가 Spring Boot 4.0.x 까지만 지원해 4.0.8 을 쓴다. 4.1 지원 버전이 나오면 올린다.
 
-## 구간 간 인터페이스 (PRD 10.1, 2026-09-30 확정 — 시그니처 변경은 PL 리뷰)
+## 구간 간 인터페이스 (PRD 10.1, 확정 — 시그니처 변경은 PL 리뷰)
 | 인터페이스 | 제공 | 호출 |
 |---|---|---|
 | `segment.service.SegmentService` | 팀원1 | 팀원2 |
@@ -55,7 +56,17 @@ MyBatis 스타터(4.0.1)가 Spring Boot 4.0.x 까지만 지원해 4.0.8 을 쓴�
 | `coupon.service.CouponService` | 팀원3 | 팀원2, 팀원1 |
 | `common.render.PlaceholderRenderer` | 팀원3 | 팀원2 |
 
-제공 측은 W1 수요일까지 고정값을 돌려주는 stub 구현을 먼저 병합하고, 이후 실제 구현으로 교체한다.
+제공 측은 W1에서 가장 먼저 고정값을 돌려주는 stub 구현을 병합하고, 이후 실제 구현으로 교체한다.
+
+```java
+@Service   // 예: segment/service/SegmentServiceStub.java — 실제 구현을 넣을 때 이 파일은 삭제
+public class SegmentServiceStub implements SegmentService {
+    @Override
+    public List<Long> findTargetCustomers(long segmentId) { return List.of(); }  // TODO 실제 구현으로 교체
+}
+```
+- 같은 인터페이스의 빈이 2개(stub + 실제)면 기동이 실패하므로 교체할 때 stub 은 지운다.
+- 다른 도메인 테이블은 **조회(SELECT)만** 자기 mapper 에서 직접 해도 된다. 쓰기는 소유 도메인의 서비스로만.
 
 ## Flyway
 `src/main/resources/db/migration`. 적용된 파일은 수정 금지, 번호 대역은 `docs/workflow-git.md`.
