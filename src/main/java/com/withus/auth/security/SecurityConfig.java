@@ -11,6 +11,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.authentication.session.NullAuthenticatedSessionStrategy;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 
@@ -54,6 +55,9 @@ public class SecurityConfig {
 				// SPA 설정: JS 가 읽을 수 있는 XSRF-TOKEN 쿠키, 원문 토큰을 헤더로 받는다
 				.csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
 				.csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
+				// 쿠키 JWT(STATELESS)에서는 매 요청이 '새 로그인'으로 간주돼 기본 전략이 XSRF 쿠키를 지운다.
+				// 그러면 GET 다음의 POST 가 403 이 되므로 요청마다 토큰을 교체하지 않는다
+				.sessionAuthenticationStrategy(new NullAuthenticatedSessionStrategy())
 				.ignoringRequestMatchers(PUBLIC_PATHS))
 			.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 			.httpBasic(AbstractHttpConfigurer::disable)

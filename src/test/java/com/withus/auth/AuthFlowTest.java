@@ -106,6 +106,15 @@ class AuthFlowTest {
 	}
 
 	@Test
+	void 인증된_GET_요청이_XSRF_쿠키를_지우지_않는다() throws Exception {
+		// 회귀 방지: 브라우저는 서버의 쿠키 삭제 지시를 따르므로, GET 뒤 POST 가 403 이 됐던 문제
+		Cookie access = login(PASSWORD).andReturn().getResponse().getCookie(AuthCookies.ACCESS_TOKEN);
+		MockHttpServletResponse res = mvc.perform(get("/api/v1/auth/me").cookie(access, xsrf))
+			.andExpect(status().isOk()).andReturn().getResponse();
+		assertThat(res.getCookie("XSRF-TOKEN")).as("GET 응답이 XSRF-TOKEN 을 바꾸거나 지우면 안 된다").isNull();
+	}
+
+	@Test
 	void 재발급하면_이전_Refresh_토큰은_무효가_된다() throws Exception {
 		Cookie oldRefresh = login(PASSWORD).andReturn().getResponse().getCookie(AuthCookies.REFRESH_TOKEN);
 
