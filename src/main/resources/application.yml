@@ -46,5 +46,18 @@ withus:
     start: "08:00"
     end: "20:50"
   jwt:
+    secret: ${JWT_SECRET}
     access-ttl: 30m
     refresh-ttl: 7d
+  cookie:
+    secure: true          # local 프로필에서만 false (http)
+  owner:
+    # 최초 OWNER 계정 (OWNER 가 없을 때만 1회 생성)
+    email: ${OWNER_EMAIL:}
+    password: ${OWNER_PASSWORD:}
+
+springdoc:
+  swagger-ui:
+    # Swagger UI 가 XSRF-TOKEN 쿠키를 읽어 X-XSRF-TOKEN 헤더로 보낸다 (POST 테스트용)
+    csrf:
+      enabled: true
