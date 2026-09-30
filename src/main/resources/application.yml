@@ -39,9 +39,9 @@ withus:
     name: 위드어스
     phone: 02-000-0000
     unsubscribe-phone: 080-000-0000
-    from-address: hello@${WITHUS_MAIL_DOMAIN:withus.local}
+    from-address: ${WITHUS_MAIL_FROM:hello@withus.local}   # 운영: SES에 인증한 이메일 주소
   tracking:
-    base-url: ${WITHUS_API_BASE_URL:http://localhost:8080}
+    base-url: ${WITHUS_PUBLIC_BASE_URL:http://localhost:8080}   # 메일 링크 기준 주소. 운영: Amplify 주소
     bot-click-seconds: 10
     bot-user-agent-keywords: bot,crawler,spider,scanner,preview
   send-window:
