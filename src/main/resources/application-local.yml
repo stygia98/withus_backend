@@ -7,7 +7,7 @@ spring:
     host: localhost
     port: 1025
   flyway:
-    # local 전용 시드(V2__seed_local.sql)는 db/migration/local 에 둔다 (DB_SCHEMA.md 9장)
+    # local 전용 시드(R__seed_local.sql, 반복 실행)는 db/migration/local 에 둔다 (DB_SCHEMA.md 9장)
     locations: classpath:db/migration,classpath:db/migration/local
 
 withus:
