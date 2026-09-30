@@ -1,0 +1,5 @@
+# 줄바꿈을 LF로 통일 (OS별 autocrlf 차이로 PR 전체 diff가 생기는 것 방지)
+* text=auto eol=lf
+/mvnw text eol=lf
+*.cmd text eol=crlf
+*.jar binary

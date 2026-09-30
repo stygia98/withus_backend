@@ -1,0 +1,54 @@
+# 공통 설정. 비밀값은 환경변수로만 주입한다 (CLAUDE.md 7장)
+spring:
+  application:
+    name: withus-backend
+  profiles:
+    active: local
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    hikari:
+      # DB 세션 타임존 고정 (PRD 2.4)
+      connection-init-sql: SET TIME ZONE 'Asia/Seoul'
+  flyway:
+    locations: classpath:db/migration
+  jackson:
+    time-zone: Asia/Seoul
+  task:
+    scheduling:
+      pool:
+        size: 5
+  servlet:
+    multipart:
+      max-file-size: 10MB
+
+mybatis:
+  mapper-locations: classpath:mapper/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+    default-statement-timeout: 30
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui/index.html
+
+ses:
+  max-send-rate: 1
+
+withus:
+  sender:
+    name: 위드어스
+    phone: 02-000-0000
+    unsubscribe-phone: 080-000-0000
+    from-address: hello@${WITHUS_MAIL_DOMAIN:withus.local}
+  tracking:
+    base-url: ${WITHUS_API_BASE_URL:http://localhost:8080}
+    bot-click-seconds: 10
+    bot-user-agent-keywords: bot,crawler,spider,scanner,preview
+  send-window:
+    start: "08:00"
+    end: "20:50"
+  jwt:
+    access-ttl: 30m
+    refresh-ttl: 7d
