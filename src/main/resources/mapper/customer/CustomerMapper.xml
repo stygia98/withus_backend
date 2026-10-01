@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.withus.customer.mapper.CustomerMapper">
+
+	<sql id="columns">
+		customer_id, name, email, phone, region_code, birth_date, joined_at, total_purchase,
+		email_consent_yn, email_consent_at, sms_consent_yn, sms_consent_at, dormant_yn, source, created_at, updated_at
+	</sql>
+
+	<select id="findActiveById" resultType="com.withus.customer.domain.Customer">
+		SELECT <include refid="columns"/> FROM customer WHERE customer_id = #{customerId} AND deleted_yn = 'N'
+	</select>
+
+	<select id="existsActiveEmail" resultType="boolean">
+		SELECT EXISTS (
+			SELECT 1 FROM customer
+			WHERE email = #{email} AND deleted_yn = 'N'
+			<if test="excludeId != null">AND customer_id &lt;&gt; #{excludeId}</if>
+		)
+	</select>
+
+	<insert id="insert" useGeneratedKeys="true" keyProperty="customerId" keyColumn="customer_id">
+		INSERT INTO customer (name, email, phone, region_code, birth_date, joined_at,
+			email_consent_yn, email_consent_at, sms_consent_yn, sms_consent_at, source)
+		VALUES (#{name}, #{email}, #{phone}, #{regionCode}, #{birthDate}, #{joinedAt},
+			#{emailConsentYn}, CASE WHEN #{emailConsentYn} = 'Y' THEN now() END,
+			#{smsConsentYn}, CASE WHEN #{smsConsentYn} = 'Y' THEN now() END, #{source})
+	</insert>
+
+	<update id="update">
+		UPDATE customer
+		SET name = #{f.name}, email = #{f.email}, phone = #{f.phone}, region_code = #{f.regionCode},
+		    birth_date = #{f.birthDate}, joined_at = #{f.joinedAt}, updated_at = now()
+		WHERE customer_id = #{customerId} AND deleted_yn = 'N'
+	</update>
+
+	<update id="softDelete">
+		UPDATE customer SET deleted_yn = 'Y', updated_at = now()
+		WHERE customer_id = #{customerId} AND deleted_yn = 'N'
+	</update>
+
+	<select id="findSuppressedChannels" resultType="com.withus.common.domain.Channel">
+		SELECT channel FROM suppression
+		WHERE (channel = 'EMAIL' AND value = #{email}) OR (channel = 'SMS' AND value = #{phone})
+		ORDER BY channel
+	</select>
+
+	<insert id="insertConsentHistory">
+		INSERT INTO consent_history (customer_id, channel, before_yn, after_yn, source, note)
+		VALUES (#{customerId}, #{channel}, #{beforeYn}, #{afterYn}, #{source}, #{note})
+	</insert>
+</mapper>
