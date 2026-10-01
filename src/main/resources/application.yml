@@ -33,6 +33,7 @@ mybatis:
 
 ses:
   max-send-rate: 1
+  topic-arn: ${SES_TOPIC_ARN:}   # 반송·스팸신고 SNS 토픽. 비어 있으면 웹훅은 모든 요청을 무시한다 (W5 배포 시 설정)
 
 withus:
   sender:
