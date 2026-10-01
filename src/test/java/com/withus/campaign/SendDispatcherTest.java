@@ -26,6 +26,7 @@ import com.withus.campaign.service.MessageComposer;
 import com.withus.campaign.service.SendDispatcher;
 import com.withus.campaign.service.messaging.MessageSenderRouter;
 import com.withus.common.domain.Channel;
+import com.withus.common.token.UnsubscribeTokens;
 import com.withus.customer.service.ConsentService;
 
 /**
@@ -50,6 +51,8 @@ class SendDispatcherTest {
 	ConsentService consentService;
 	@Autowired
 	MessageComposer messageComposer;
+	@Autowired
+	UnsubscribeTokens unsubscribeTokens;
 	@Autowired
 	MemberMapper memberMapper;
 	@Autowired
@@ -161,7 +164,7 @@ class SendDispatcherTest {
 
 		// 재시작을 흉내낸다: 완전히 새 SendDispatcher 인스턴스로 다시 호출해도 더 처리할 PENDING 이 없어야 한다
 		SendDispatcher restarted = new SendDispatcher(sendLogMapper, templateMapper, messageSenderRouter,
-			consentService, messageComposer, 1, "08:00", "20:50", "https://withus.local", false);
+			consentService, messageComposer, unsubscribeTokens, 1, "08:00", "20:50", "https://withus.local", false);
 		restarted.dispatch();
 
 		Long pendingCount = jdbcTemplate.queryForObject(

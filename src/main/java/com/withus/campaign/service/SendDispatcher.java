@@ -20,6 +20,7 @@ import com.withus.campaign.service.messaging.ErrorType;
 import com.withus.campaign.service.messaging.MessageSenderRouter;
 import com.withus.campaign.service.messaging.OutboundMessage;
 import com.withus.campaign.service.messaging.SendResult;
+import com.withus.common.token.UnsubscribeTokens;
 import com.withus.customer.service.ConsentService;
 
 /**
@@ -41,6 +42,7 @@ public class SendDispatcher {
 	private final MessageSenderRouter messageSenderRouter;
 	private final ConsentService consentService;
 	private final MessageComposer messageComposer;
+	private final UnsubscribeTokens unsubscribeTokens;
 	private final TokenBucket tokenBucket;
 	private final SendWindow sendWindow;
 	private final String trackingBaseUrl;
@@ -48,6 +50,7 @@ public class SendDispatcher {
 
 	public SendDispatcher(SendLogMapper sendLogMapper, TemplateMapper templateMapper,
 			MessageSenderRouter messageSenderRouter, ConsentService consentService, MessageComposer messageComposer,
+			UnsubscribeTokens unsubscribeTokens,
 			@Value("${ses.max-send-rate}") int maxSendRate,
 			@Value("${withus.send-window.start}") String sendWindowStart,
 			@Value("${withus.send-window.end}") String sendWindowEnd,
@@ -58,6 +61,7 @@ public class SendDispatcher {
 		this.messageSenderRouter = messageSenderRouter;
 		this.consentService = consentService;
 		this.messageComposer = messageComposer;
+		this.unsubscribeTokens = unsubscribeTokens;
 		this.tokenBucket = new TokenBucket(maxSendRate);
 		this.sendWindow = new SendWindow(LocalTime.parse(sendWindowStart), LocalTime.parse(sendWindowEnd));
 		this.trackingBaseUrl = trackingBaseUrl;
@@ -166,11 +170,15 @@ public class SendDispatcher {
 	}
 
 	/**
-	 * 임시값: PL 공용 HMAC 수신거부 토큰 유틸(발송 큐 Plan 15장 Q1)이 나오기 전까지
-	 * send_log.tracking_token(이미 DB 에서 발급된 고유값)을 그대로 재사용한다.
-	 * 유틸이 나오면 서명된 토큰으로 교체한다 (ponytail: 임시값, PL 유틸 도착 시 교체).
+	 * PL 공용 HMAC 유틸(발송 큐 Plan 15장 Q1, {@link UnsubscribeTokens})로 서명한 토큰을 쓴다.
+	 * TEST(customer_id NULL)는 실제 고객이 없어 토큰을 발급할 수 없으므로 예시 링크를 쓴다
+	 * (미리보기·테스트발송 작업과 동일한 처리).
 	 */
 	private String unsubscribeUrl(SendLog sendLog) {
-		return trackingBaseUrl + "/unsubscribe/" + sendLog.getTrackingToken();
+		if (sendLog.getCustomerId() == null) {
+			return trackingBaseUrl + "/unsubscribe/example";
+		}
+		String token = unsubscribeTokens.issue(sendLog.getSendLogId(), sendLog.getCustomerId());
+		return trackingBaseUrl + "/unsubscribe/" + token;
 	}
 }
