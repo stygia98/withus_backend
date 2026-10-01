@@ -5,7 +5,6 @@ import java.time.LocalTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -25,10 +24,7 @@ import com.withus.customer.service.ConsentService;
 
 /**
  * 발송 큐 디스패처 (발송 큐 Plan 3장) — 선점(tx1, 짧은 UPDATE 한 건으로 자동 커밋)
- * → 트랜잭션 밖에서 TokenBucket 통과·MessageSender 호출 → 결과 기록(tx2, 역시 단건 UPDATE).
- * 발송 직전 재확인(SendRecheck)·렌더링(MessageComposer)·재시도(TRANSIENT 백오프)는 후속 작업에서
- * processOne 에 끼워 넣는다 — 지금은 템플릿 원문을 그대로 보낸다
- * (ponytail: 치환자·광고문구·추적 링크 미적용, 렌더링 작업에서 교체).
+ * → 트랜잭션 밖에서 TokenBucket 통과·렌더링(MessageComposer)·MessageSender 호출 → 결과 기록(tx2, 역시 단건 UPDATE).
  */
 @Component
 public class SendDispatcher {
@@ -44,22 +40,27 @@ public class SendDispatcher {
 	private final TemplateMapper templateMapper;
 	private final MessageSenderRouter messageSenderRouter;
 	private final ConsentService consentService;
+	private final MessageComposer messageComposer;
 	private final TokenBucket tokenBucket;
 	private final SendWindow sendWindow;
+	private final String trackingBaseUrl;
 	private final boolean schedulerEnabled;
 
 	public SendDispatcher(SendLogMapper sendLogMapper, TemplateMapper templateMapper,
-			MessageSenderRouter messageSenderRouter, ConsentService consentService,
+			MessageSenderRouter messageSenderRouter, ConsentService consentService, MessageComposer messageComposer,
 			@Value("${ses.max-send-rate}") int maxSendRate,
 			@Value("${withus.send-window.start}") String sendWindowStart,
 			@Value("${withus.send-window.end}") String sendWindowEnd,
+			@Value("${withus.tracking.base-url}") String trackingBaseUrl,
 			@Value("${withus.scheduler.send-dispatcher.enabled:true}") boolean schedulerEnabled) {
 		this.sendLogMapper = sendLogMapper;
 		this.templateMapper = templateMapper;
 		this.messageSenderRouter = messageSenderRouter;
 		this.consentService = consentService;
+		this.messageComposer = messageComposer;
 		this.tokenBucket = new TokenBucket(maxSendRate);
 		this.sendWindow = new SendWindow(LocalTime.parse(sendWindowStart), LocalTime.parse(sendWindowEnd));
+		this.trackingBaseUrl = trackingBaseUrl;
 		this.schedulerEnabled = schedulerEnabled;
 	}
 
@@ -96,8 +97,11 @@ public class SendDispatcher {
 			return; // recheck 안에서 SKIPPED·PENDING 복귀·시간창 보류를 이미 기록했다
 		}
 		tokenBucket.acquire();
-		OutboundMessage message = buildMessage(sendLog, template);
-		SendResult result = messageSenderRouter.send(message);
+		Optional<OutboundMessage> message = messageComposer.compose(sendLog, template, unsubscribeUrl(sendLog));
+		if (message.isEmpty()) {
+			return; // 쿠폰 유효기간 밖 — compose 안에서 이미 SKIPPED(COUPON_INVALID) 기록
+		}
+		SendResult result = messageSenderRouter.send(message.get());
 		if (result.success()) {
 			sendLogMapper.recordSent(sendLog.getSendLogId(), result.providerMessageId());
 		} else if (result.errorType() == ErrorType.TRANSIENT) {
@@ -161,8 +165,12 @@ public class SendDispatcher {
 		return templateMapper.findById(templateId);
 	}
 
-	private OutboundMessage buildMessage(SendLog sendLog, Template template) {
-		return new OutboundMessage(sendLog.getChannel(), sendLog.getRecipient(), template.getSubject(),
-			template.getBody(), Map.of());
+	/**
+	 * 임시값: PL 공용 HMAC 수신거부 토큰 유틸(발송 큐 Plan 15장 Q1)이 나오기 전까지
+	 * send_log.tracking_token(이미 DB 에서 발급된 고유값)을 그대로 재사용한다.
+	 * 유틸이 나오면 서명된 토큰으로 교체한다 (ponytail: 임시값, PL 유틸 도착 시 교체).
+	 */
+	private String unsubscribeUrl(SendLog sendLog) {
+		return trackingBaseUrl + "/unsubscribe/" + sendLog.getTrackingToken();
 	}
 }
