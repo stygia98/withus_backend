@@ -10,7 +10,8 @@ public enum CustomerErrorCode implements ErrorCode {
 	CUSTOMER_INVALID_REGION(HttpStatus.BAD_REQUEST, "지역 값이 올바르지 않습니다."),
 	CUSTOMER_INVALID_PHONE(HttpStatus.BAD_REQUEST, "휴대폰 번호 형식이 올바르지 않습니다."),
 	CUSTOMER_INVALID_DATE(HttpStatus.BAD_REQUEST, "날짜는 YYYY-MM-DD 형식이어야 합니다."),
-	CUSTOMER_DUPLICATE_EMAIL(HttpStatus.CONFLICT, "이미 등록된 이메일입니다.");
+	CUSTOMER_DUPLICATE_EMAIL(HttpStatus.CONFLICT, "이미 등록된 이메일입니다."),
+	CUSTOMER_CONSENT_EVIDENCE_REQUIRED(HttpStatus.UNPROCESSABLE_CONTENT, "수신거부 이력이 있어 재동의 증빙 메모가 필요합니다.");
 
 	private final HttpStatus status;
 	private final String message;

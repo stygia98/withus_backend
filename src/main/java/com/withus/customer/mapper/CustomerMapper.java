@@ -6,8 +6,10 @@ import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
 import com.withus.common.domain.Channel;
+import com.withus.customer.domain.ConsentHistory;
 import com.withus.customer.domain.Customer;
 import com.withus.customer.domain.CustomerFields;
+import com.withus.customer.domain.CustomerSearch;
 
 @Mapper
 public interface CustomerMapper {
@@ -29,7 +31,22 @@ public interface CustomerMapper {
 	/** 이메일·휴대폰이 suppression 에 있는 채널 (정규화된 값으로 비교) */
 	List<Channel> findSuppressedChannels(@Param("email") String email, @Param("phone") String phone);
 
+	/** 동의 이력 기록. source: ADMIN, UPLOAD, UNSUBSCRIBE, BOUNCE, COMPLAINT */
 	void insertConsentHistory(@Param("customerId") long customerId, @Param("channel") Channel channel,
 		@Param("beforeYn") String beforeYn, @Param("afterYn") String afterYn, @Param("source") String source,
 		@Param("note") String note);
+
+	/** 삭제되지 않은 고객 목록 (검색·필터·정렬·페이징) */
+	List<Customer> search(@Param("s") CustomerSearch search);
+
+	long count(@Param("s") CustomerSearch search);
+
+	/** 채널 동의 변경. Y면 동의 일시를 지금으로, N이면 비운다. 삭제된 고객이면 0 */
+	int updateConsent(@Param("customerId") long customerId, @Param("channel") Channel channel,
+		@Param("yn") String yn);
+
+	void deleteSuppression(@Param("channel") Channel channel, @Param("value") String value);
+
+	/** 최신순 */
+	List<ConsentHistory> findConsentHistory(long customerId);
 }
