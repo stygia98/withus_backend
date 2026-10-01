@@ -1,7 +1,13 @@
 package com.withus.customer.controller;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -12,6 +18,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 import com.withus.common.response.ApiResponse;
 import com.withus.common.response.PageResponse;
@@ -21,7 +28,10 @@ import com.withus.customer.dto.CustomerCreateRequest;
 import com.withus.customer.dto.CustomerListItem;
 import com.withus.customer.dto.CustomerResponse;
 import com.withus.customer.dto.CustomerUpdateRequest;
+import com.withus.customer.dto.UploadResult;
 import com.withus.customer.service.CustomerService;
+import com.withus.customer.service.CustomerUploadFile;
+import com.withus.customer.service.CustomerUploadService;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -37,6 +47,26 @@ import lombok.RequiredArgsConstructor;
 public class CustomerController {
 
 	private final CustomerService customerService;
+	private final CustomerUploadService uploadService;
+
+	@Operation(summary = "CSV/xlsx 업로드", description = "PRD F-01. 1행은 양식 헤더, 최대 10MB·10,000행. "
+		+ "이메일이 같은 (삭제되지 않은) 고객은 갱신(누적구매액 유지, 빈 칸은 기존 값 유지), 없으면 신규. "
+		+ "수신거부 목록에 있는 채널은 동의 N 으로 저장(suppressed 에 집계). 실패 행은 failures 에 행 번호·사유 코드로 돌려주고 "
+		+ "성공 행은 저장한다. 오류: UPLOAD_INVALID_FILE·UPLOAD_INVALID_HEADER·UPLOAD_TOO_MANY_ROWS(400)")
+	@PostMapping(value = "/uploads", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+	public ApiResponse<UploadResult> upload(@RequestParam("file") MultipartFile file) throws IOException {
+		return ApiResponse.ok(uploadService.upload(file.getOriginalFilename(), file.getBytes()));
+	}
+
+	@Operation(summary = "업로드 양식 xlsx 다운로드", description = "헤더 1행. 휴대폰·날짜 칸은 텍스트 서식")
+	@GetMapping("/upload-template")
+	public ResponseEntity<byte[]> uploadTemplate() {
+		return ResponseEntity.ok()
+			.header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
+				.filename("고객_업로드_양식.xlsx", StandardCharsets.UTF_8).build().toString())
+			.contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+			.body(CustomerUploadFile.template());
+	}
 
 	@Operation(summary = "목록", description = "삭제되지 않은 고객. 이메일·휴대폰은 일부 마스킹. "
 		+ "keyword 는 이름·이메일·휴대폰 부분 일치, region 은 시·도명 또는 코드, 동의·휴면 필터는 Y/N. "
