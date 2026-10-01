@@ -17,6 +17,7 @@ import com.withus.common.exception.CommonErrorCode;
 import com.withus.tracking.domain.QueueCounts;
 import com.withus.tracking.domain.RecentEventRow;
 import com.withus.tracking.dto.CampaignAnalyticsResponse;
+import com.withus.tracking.dto.CampaignStepsResponse;
 import com.withus.tracking.dto.DailySendResponse;
 import com.withus.tracking.dto.DashboardSummaryResponse;
 import com.withus.tracking.dto.QueueStatusResponse;
@@ -70,7 +71,7 @@ public class DashboardService {
 		}
 		OffsetDateTime fromTs = start.atStartOfDay(SEOUL).toOffsetDateTime();
 		OffsetDateTime toTs = end.plusDays(1).atStartOfDay(SEOUL).toOffsetDateTime();
-		return new DashboardSummaryResponse(start, end, SendKpi.of(dashboardMapper.sendStats(null, fromTs, toTs)));
+		return new DashboardSummaryResponse(start, end, SendKpi.of(dashboardMapper.sendStats(null, null, fromTs, toTs)));
 	}
 
 	/** 오늘 포함 최근 days 일의 일별 발송 성공 건수 (오래된 날짜부터, 발송 없는 날은 0) */
@@ -117,7 +118,24 @@ public class DashboardService {
 			throw new BusinessException(CommonErrorCode.COMMON_NOT_FOUND);
 		}
 		return CampaignAnalyticsResponse.of(campaignId, name,
-			SendKpi.of(dashboardMapper.sendStats(campaignId, null, null)));
+			SendKpi.of(dashboardMapper.sendStats(campaignId, null, null, null)));
+	}
+
+	/** 워크플로우 발송 단계별 KPI. 단계 수가 최대 15개(노드 제한)라 단계마다 같은 집계 SQL 을 쓴다 — 캠페인 KPI 와 정의를 맞추기 위해 */
+	public CampaignStepsResponse steps(long campaignId) {
+		String name = dashboardMapper.campaignName(campaignId);
+		if (name == null) {
+			throw new BusinessException(CommonErrorCode.COMMON_NOT_FOUND);
+		}
+		String type = dashboardMapper.campaignType(campaignId);
+		List<CampaignStepsResponse.StepAnalytics> steps = "WORKFLOW".equals(type)
+			? dashboardMapper.sendSteps(campaignId).stream()
+				.map(step -> new CampaignStepsResponse.StepAnalytics(step.getStepId(), step.getNodeType(),
+					step.getTemplateId(), step.getTemplateName(), step.getCouponId(),
+					SendKpi.of(dashboardMapper.sendStats(campaignId, step.getStepId(), null, null))))
+				.toList()
+			: List.of();
+		return new CampaignStepsResponse(campaignId, name, type, steps);
 	}
 
 	private static BusinessException invalid(String message) {

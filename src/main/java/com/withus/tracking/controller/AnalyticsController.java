@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.withus.common.response.ApiResponse;
 import com.withus.tracking.dto.CampaignAnalyticsResponse;
+import com.withus.tracking.dto.CampaignStepsResponse;
 import com.withus.tracking.service.DashboardService;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -28,5 +29,12 @@ public class AnalyticsController {
 	@GetMapping("/campaigns/{campaignId}")
 	public ApiResponse<CampaignAnalyticsResponse> campaign(@PathVariable long campaignId) {
 		return ApiResponse.ok(dashboardService.campaign(campaignId));
+	}
+
+	@Operation(summary = "워크플로우 단계별 집계", description = "SEND_EMAIL·SEND_SMS 단계마다 캠페인 KPI 와 같은 정의의 지표. "
+		+ "일회성 캠페인이면 steps 는 빈 배열. 오류: COMMON_NOT_FOUND(404)")
+	@GetMapping("/campaigns/{campaignId}/steps")
+	public ApiResponse<CampaignStepsResponse> steps(@PathVariable long campaignId) {
+		return ApiResponse.ok(dashboardService.steps(campaignId));
 	}
 }
