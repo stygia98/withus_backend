@@ -9,6 +9,9 @@ spring:
   flyway:
     # local 전용 시드(R__seed_local.sql, 반복 실행)는 db/migration/local 에 둔다 (DB_SCHEMA.md 9장)
     locations: classpath:db/migration,classpath:db/migration/local
+    # 브랜치를 오가며 DB 에는 적용됐지만 지금 코드에는 없는 마이그레이션(다른 팀원 대역 등)이 있어도 기동한다.
+    # local 전용 — 운영은 검증을 그대로 둔다
+    ignore-migration-patterns: "*:missing"
 
 withus:
   mail:

@@ -15,6 +15,7 @@ import com.withus.auth.dto.MemberUpdateRequest;
 import com.withus.auth.mapper.MemberMapper;
 import com.withus.common.exception.BusinessException;
 import com.withus.common.exception.CommonErrorCode;
+import com.withus.common.normalize.Emails;
 
 /**
  * 사용자 관리 (PRD 3장 "사용자 계정/권한 관리" OWNER 전용, 4장 /settings/users)
@@ -41,7 +42,7 @@ public class MemberService {
 
 	@Transactional
 	public MemberAdminResponse create(MemberCreateRequest req) {
-		String email = AuthService.normalizeEmail(req.email());
+		String email = Emails.normalize(req.email());
 		if (memberMapper.existsEmail(email)) {
 			throw new BusinessException(AuthErrorCode.MEMBER_DUPLICATE_EMAIL);
 		}
