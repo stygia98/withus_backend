@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.withus.customer.mapper.CustomerUploadMapper">
+
+	<select id="findActiveByEmails" resultType="com.withus.customer.domain.Customer">
+		SELECT customer_id, email, phone, email_consent_yn, sms_consent_yn
+		FROM customer
+		WHERE deleted_yn = 'N' AND email IN
+		<foreach collection="emails" item="e" open="(" separator="," close=")">#{e}</foreach>
+	</select>
+
+	<select id="findSuppressions" resultType="string">
+		SELECT channel || ':' || value FROM suppression
+		WHERE (channel = 'EMAIL' AND value IN
+			<foreach collection="emails" item="e" open="(" separator="," close=")">#{e}</foreach>)
+		<if test="!phones.isEmpty()">
+			OR (channel = 'SMS' AND value IN
+				<foreach collection="phones" item="p" open="(" separator="," close=")">#{p}</foreach>)
+		</if>
+	</select>
+
+	<insert id="insertBatch">
+		INSERT INTO customer (name, email, phone, region_code, birth_date, joined_at, total_purchase,
+			email_consent_yn, email_consent_at, sms_consent_yn, sms_consent_at, source)
+		VALUES
+		<foreach collection="rows" item="r" separator=",">
+			(#{r.f.name}, #{r.f.email}, #{r.f.phone}, #{r.f.regionCode}, #{r.f.birthDate}, #{r.f.joinedAt},
+			 #{r.totalPurchase}, #{r.emailYn}, CASE WHEN #{r.emailYn} = 'Y' THEN now() END,
+			 #{r.smsYn}, CASE WHEN #{r.smsYn} = 'Y' THEN now() END, 'UPLOAD')
+		</foreach>
+	</insert>
+
+	<insert id="insertInitialHistory">
+		INSERT INTO consent_history (customer_id, channel, before_yn, after_yn, source)
+		SELECT customer_id, 'EMAIL', NULL, 'Y', 'UPLOAD' FROM customer
+		WHERE deleted_yn = 'N' AND email_consent_yn = 'Y' AND email IN
+			<foreach collection="emails" item="e" open="(" separator="," close=")">#{e}</foreach>
+		UNION ALL
+		SELECT customer_id, 'SMS', NULL, 'Y', 'UPLOAD' FROM customer
+		WHERE deleted_yn = 'N' AND sms_consent_yn = 'Y' AND email IN
+			<foreach collection="emails" item="e" open="(" separator="," close=")">#{e}</foreach>
+	</insert>
+
+	<!--
+		기존 고객 갱신. 누적구매액은 바꾸지 않는다 (PRD F-01). 파일의 빈 칸은 기존 값을 유지한다
+		동의 일시: 새로 Y 가 되면 지금, 이미 Y 면 그대로, N 이면 비운다 (개별 동의 변경과 같은 규칙)
+	-->
+	<update id="update">
+		UPDATE customer
+		SET name = COALESCE(#{r.f.name}, name),
+		    phone = COALESCE(#{r.f.phone}, phone),
+		    region_code = COALESCE(#{r.f.regionCode}, region_code),
+		    birth_date = COALESCE(#{r.f.birthDate}::date, birth_date),
+		    joined_at = #{r.f.joinedAt},
+		    email_consent_yn = #{r.emailYn},
+		    email_consent_at = CASE WHEN #{r.emailYn} = 'Y'
+		                            THEN COALESCE(CASE WHEN email_consent_yn = 'Y' THEN email_consent_at END, now()) END,
+		    sms_consent_yn = #{r.smsYn},
+		    sms_consent_at = CASE WHEN #{r.smsYn} = 'Y'
+		                          THEN COALESCE(CASE WHEN sms_consent_yn = 'Y' THEN sms_consent_at END, now()) END,
+		    updated_at = now()
+		WHERE customer_id = #{r.customerId} AND deleted_yn = 'N'
+	</update>
+
+	<insert id="insertHistoryBatch">
+		INSERT INTO consent_history (customer_id, channel, before_yn, after_yn, source)
+		VALUES
+		<foreach collection="rows" item="h" separator=",">
+			(#{h.customerId}, #{h.channel}, #{h.beforeYn}, #{h.afterYn}, 'UPLOAD')
+		</foreach>
+	</insert>
+</mapper>

@@ -42,7 +42,9 @@ class CustomerListApiTest {
 
 	@BeforeEach
 	void setUp() throws Exception {
-		tag = UUID.randomUUID().toString().substring(0, 8);
+		// 숫자가 섞이면 검색어가 휴대폰 검색으로도 쓰여 다른 고객 번호와 우연히 겹칠 수 있어 문자만 쓴다 (0~9 → g~p)
+		tag = UUID.randomUUID().toString().substring(0, 8).chars().map(c -> Character.isDigit(c) ? c - '0' + 'g' : c)
+			.collect(StringBuilder::new, StringBuilder::appendCodePoint, StringBuilder::append).toString();
 		phoneTail = String.valueOf(1000 + (int) (Math.random() * 9000));
 		create("가" + tag, "a" + tag + "@withus.local", "010-1111-" + phoneTail, "서울", "2026-01-03", "Y");
 		create("나" + tag, "b" + tag + "@withus.local", null, "경기", "2026-01-01", "N");
@@ -81,8 +83,10 @@ class CustomerListApiTest {
 
 	@Test
 	void 검색어의_와일드카드는_문자_그대로_찾는다() throws Exception {
-		list("keyword=%25" + tag).andExpect(jsonPath("$.data.totalElements").value(0));
-		list("keyword=_" + tag.substring(1)).andExpect(jsonPath("$.data.totalElements").value(0));
+		// 쿼리 문자열에 %25 를 직접 쓰면 MockMvc 가 다시 인코딩해 % 가 서버에 닿지 않는다 → param 으로 넘긴다
+		call(get("/api/v1/customers").param("keyword", "%" + tag)).andExpect(jsonPath("$.data.totalElements").value(0));
+		call(get("/api/v1/customers").param("keyword", "_" + tag.substring(1)))
+			.andExpect(jsonPath("$.data.totalElements").value(0));
 	}
 
 	@Test
