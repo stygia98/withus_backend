@@ -4,6 +4,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.List;
 
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -11,6 +12,7 @@ import com.withus.common.exception.BusinessException;
 import com.withus.common.exception.CommonErrorCode;
 import com.withus.common.response.PageResponse;
 import com.withus.segment.domain.Segment;
+import com.withus.segment.domain.SegmentErrorCode;
 import com.withus.segment.domain.SegmentQuery;
 import com.withus.segment.dto.SegmentPreviewResponse;
 import com.withus.segment.dto.SegmentRequest;
@@ -50,6 +52,33 @@ public class SegmentServiceImpl implements SegmentService {
 		segmentMapper.insert(segment);
 		segmentMapper.insertRule(segment.getSegmentId(), segment.getRuleJson());
 		return get(segment.getSegmentId());
+	}
+
+	/** 이름·설명·규칙을 통째로 바꾼다. 세그먼트는 동적이라 바뀐 규칙이 다음 계산부터 바로 쓰인다 */
+	@Transactional
+	public SegmentResponse update(long segmentId, SegmentRequest req) {
+		SegmentRuleTranslator.translate(req.rule(), today());
+		if (segmentMapper.update(segmentId, req.name().trim(), blankToNull(req.description())) == 0) {
+			throw new BusinessException(CommonErrorCode.COMMON_NOT_FOUND);
+		}
+		segmentMapper.updateRule(segmentId, req.rule().toString());
+		return get(segmentId);
+	}
+
+	/** 캠페인이 참조 중이면 SEGMENT_IN_USE (API_SPEC 4장). 규칙은 CASCADE 로 함께 지워진다 */
+	@Transactional
+	public void delete(long segmentId) {
+		if (segmentMapper.existsCampaign(segmentId)) {
+			throw new BusinessException(SegmentErrorCode.SEGMENT_IN_USE);
+		}
+		try {
+			if (segmentMapper.delete(segmentId) == 0) {
+				throw new BusinessException(CommonErrorCode.COMMON_NOT_FOUND);
+			}
+		} catch (DataIntegrityViolationException e) {
+			// 확인과 삭제 사이에 캠페인이 이 세그먼트로 만들어진 경우 (FK 위반)
+			throw new BusinessException(SegmentErrorCode.SEGMENT_IN_USE);
+		}
 	}
 
 	@Transactional(readOnly = true)
