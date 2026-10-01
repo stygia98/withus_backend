@@ -30,7 +30,9 @@ import com.withus.common.domain.Channel;
  * @Transactional 을 안 쓴다: 두 스레드가 서로 다른 DB 커넥션으로 동시에 들어가야 하기 때문에, 각 테스트가
  * 만든 데이터는 끝나고 직접 지운다(자동 롤백이 없다)
  */
-@SpringBootTest
+// 이 클래스는 커밋된 실제 행으로 동시성을 보므로, 백그라운드 SendDispatcher 스케줄러가 같은 행을
+// 먼저 가져가 버리지 않게 끈다 (SendDispatcher 가 생기면서 필요해졌다)
+@SpringBootTest(properties = "withus.scheduler.send-dispatcher.enabled=false")
 class SendLogMapperConcurrencyTest {
 
 	@Autowired
