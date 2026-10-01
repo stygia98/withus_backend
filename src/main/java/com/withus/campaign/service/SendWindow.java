@@ -43,4 +43,36 @@ public class SendWindow {
 			beforeWindow ? now.toLocalDate() : now.toLocalDate().plusDays(1),
 			start, now.getOffset()));
 	}
+
+	/**
+	 * 캠페인 시작·예약 시 쓰는 순수 메서드(Clock 없이 startAt 을 그대로 받는다, 캠페인 3/4).
+	 * startAt 이 이미 오늘 창을 넘긴 뒤(20:50 초과)면 당겨주지 않고 바로 막는다 — 10.3 "21시에 광고
+	 * 메일을 예약하려 하면 막히고"는 "내일로 자동 연기"가 아니라 거절을 요구한다.
+	 * startAt 이 창이 열리기 전(08:00 이전)이면 오늘 08:00 으로 당겨서 계산한다(holdUntil 과 같은 규칙,
+	 * 다만 당기는 건 같은 날 안에서만 — 밤 시간대 요청을 다음 날로 몰래 넘기지 않는다).
+	 * 당긴 뒤에도 durationSeconds 가 지나 끝나는 시각이 20:50 을 넘기면 막는다
+	 * (PRD 8.4 "20:50 을 넘겨 끝날 예약은 막는다").
+	 */
+	public BulkWindowResult evaluateBulk(OffsetDateTime startAt, long durationSeconds) {
+		LocalTime startTime = startAt.toLocalTime();
+		if (startTime.isAfter(end)) {
+			return new BulkWindowResult(startAt.plusSeconds(durationSeconds), false, nextDayStart(startAt));
+		}
+		OffsetDateTime effectiveStart = startTime.isBefore(start)
+			? OffsetDateTime.of(startAt.toLocalDate(), start, startAt.getOffset())
+			: startAt;
+		OffsetDateTime expectedEndAt = effectiveStart.plusSeconds(durationSeconds);
+		boolean sameDay = expectedEndAt.toLocalDate().equals(effectiveStart.toLocalDate());
+		boolean withinEnd = !expectedEndAt.toLocalTime().isAfter(end);
+		boolean allowed = sameDay && withinEnd;
+		OffsetDateTime nextAvailableAt = allowed ? null : nextDayStart(effectiveStart);
+		return new BulkWindowResult(expectedEndAt, allowed, nextAvailableAt);
+	}
+
+	private OffsetDateTime nextDayStart(OffsetDateTime from) {
+		return OffsetDateTime.of(from.toLocalDate().plusDays(1), start, from.getOffset());
+	}
+
+	public record BulkWindowResult(OffsetDateTime expectedEndAt, boolean allowed, OffsetDateTime nextAvailableAt) {
+	}
 }

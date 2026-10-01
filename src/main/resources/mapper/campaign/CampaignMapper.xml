@@ -48,4 +48,19 @@
 		UPDATE campaign SET status = #{newStatus}, updated_at = now()
 		WHERE campaign_id = #{campaignId} AND status = #{expectedStatus}
 	</update>
+
+	<update id="schedule">
+		UPDATE campaign SET status = 'SCHEDULED', scheduled_at = #{scheduledAt}, updated_at = now()
+		WHERE campaign_id = #{campaignId} AND status = 'DRAFT'
+	</update>
+
+	<update id="cancelSchedule">
+		UPDATE campaign SET status = 'DRAFT', scheduled_at = NULL, updated_at = now()
+		WHERE campaign_id = #{campaignId} AND status = 'SCHEDULED'
+	</update>
+
+	<update id="start">
+		UPDATE campaign SET status = 'ACTIVE', started_at = now(), updated_at = now()
+		WHERE campaign_id = #{campaignId} AND status IN ('DRAFT', 'SCHEDULED')
+	</update>
 </mapper>

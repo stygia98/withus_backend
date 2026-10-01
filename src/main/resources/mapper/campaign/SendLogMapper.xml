@@ -141,4 +141,9 @@
 	<update id="recordSkippedCoupon">
 		UPDATE send_log SET status = 'SKIPPED', error_message = 'COUPON_INVALID' WHERE send_log_id = #{sendLogId}
 	</update>
+
+	<!-- 새 캠페인을 시작하기 전, 이미 밀려 있는 대기분(캠페인 3/4 estimate) -->
+	<select id="countPending" resultType="long">
+		SELECT count(*) FROM send_log WHERE status = 'PENDING'
+	</select>
 </mapper>

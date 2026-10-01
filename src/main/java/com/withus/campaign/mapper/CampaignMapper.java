@@ -1,5 +1,6 @@
 package com.withus.campaign.mapper;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 
 import org.apache.ibatis.annotations.Mapper;
@@ -30,4 +31,13 @@ public interface CampaignMapper {
 	 */
 	int updateStatus(@Param("campaignId") long campaignId, @Param("expectedStatus") CampaignStatus expectedStatus,
 			@Param("newStatus") CampaignStatus newStatus);
+
+	/** DRAFT → SCHEDULED, scheduled_at 설정(낙관적 검사). @return 바뀐 행 수 */
+	int schedule(@Param("campaignId") long campaignId, @Param("scheduledAt") OffsetDateTime scheduledAt);
+
+	/** SCHEDULED → DRAFT, scheduled_at 해제(낙관적 검사). @return 바뀐 행 수 */
+	int cancelSchedule(long campaignId);
+
+	/** DRAFT·SCHEDULED → ACTIVE, started_at 설정(낙관적 검사). @return 바뀐 행 수 */
+	int start(long campaignId);
 }

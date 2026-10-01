@@ -53,4 +53,44 @@ class SendWindowTest {
 		assertThat(result.get()).isEqualTo(
 			OffsetDateTime.of(2026, 10, 2, 8, 0, 0, 0, ZoneOffset.ofHours(9)));
 	}
+
+	// ---- evaluateBulk (캠페인 3/4 estimate·schedule·start 의 20:50 컷오프) ----
+
+	@Test
+	void 저녁_21시_예약은_막히고_다음날_08시가_안내된다() {
+		SendWindow.BulkWindowResult result = sendWindow.evaluateBulk(at(21, 0), 60);
+
+		assertThat(result.allowed()).isFalse();
+		assertThat(result.nextAvailableAt()).isEqualTo(
+			OffsetDateTime.of(2026, 10, 2, 8, 0, 0, 0, ZoneOffset.ofHours(9)));
+	}
+
+	@Test
+	void 시작은_창_안이어도_대기분_때문에_20시50분을_넘기면_막힌다() {
+		// 19:00 시작 + 2시간(7200초) = 21:00 종료 → 20:50 을 넘김
+		SendWindow.BulkWindowResult result = sendWindow.evaluateBulk(at(19, 0), 2 * 3600);
+
+		assertThat(result.allowed()).isFalse();
+		assertThat(result.expectedEndAt()).isEqualTo(at(21, 0));
+		assertThat(result.nextAvailableAt()).isEqualTo(
+			OffsetDateTime.of(2026, 10, 2, 8, 0, 0, 0, ZoneOffset.ofHours(9)));
+	}
+
+	@Test
+	void 종료가_20시50분_정각이면_허용된다() {
+		SendWindow.BulkWindowResult result = sendWindow.evaluateBulk(at(19, 50), 3600);
+
+		assertThat(result.allowed()).isTrue();
+		assertThat(result.expectedEndAt()).isEqualTo(at(20, 50));
+		assertThat(result.nextAvailableAt()).isNull();
+	}
+
+	@Test
+	void 창_시작_전이면_08시로_당겨서_계산한다() {
+		// 07:00 시작 요청 → 08:00 으로 당겨짐 + 10분 = 08:10 종료, 창 안이라 허용
+		SendWindow.BulkWindowResult result = sendWindow.evaluateBulk(at(7, 0), 600);
+
+		assertThat(result.allowed()).isTrue();
+		assertThat(result.expectedEndAt()).isEqualTo(at(8, 10));
+	}
 }

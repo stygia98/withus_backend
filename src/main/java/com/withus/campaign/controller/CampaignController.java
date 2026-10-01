@@ -1,5 +1,8 @@
 package com.withus.campaign.controller;
 
+import java.time.OffsetDateTime;
+
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -16,7 +19,9 @@ import com.withus.campaign.domain.Campaign;
 import com.withus.campaign.domain.CampaignStatus;
 import com.withus.campaign.domain.CampaignType;
 import com.withus.campaign.dto.CampaignCreateRequest;
+import com.withus.campaign.dto.CampaignEstimateResponse;
 import com.withus.campaign.dto.CampaignResponse;
+import com.withus.campaign.dto.CampaignScheduleRequest;
 import com.withus.campaign.dto.CampaignUpdateRequest;
 import com.withus.campaign.service.CampaignService;
 import com.withus.common.response.ApiResponse;
@@ -74,6 +79,39 @@ public class CampaignController {
 	public ApiResponse<CampaignResponse> update(@PathVariable long campaignId,
 		@Valid @RequestBody CampaignUpdateRequest request) {
 		Campaign campaign = campaignService.update(campaignId, request.toCampaign());
+		return ApiResponse.ok(CampaignResponse.from(campaign));
+	}
+
+	@Operation(summary = "예상 소요 시간·발송 가능 여부", description = "일회성 캠페인만 지원. 20:50 을 넘기면 allowed=false.")
+	@PreAuthorize("hasAnyRole('OWNER','MANAGER')")
+	@GetMapping("/{campaignId}/estimate")
+	public ApiResponse<CampaignEstimateResponse> estimate(@PathVariable long campaignId,
+		@RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) OffsetDateTime startAt) {
+		return ApiResponse.ok(campaignService.estimate(campaignId, startAt));
+	}
+
+	@Operation(summary = "캠페인 예약", description = "DRAFT → SCHEDULED. 오류: CAMPAIGN_SEND_WINDOW_EXCEEDED(422), COUPON_OUT_OF_PERIOD(422).")
+	@PreAuthorize("hasAnyRole('OWNER','MANAGER')")
+	@PostMapping("/{campaignId}/schedule")
+	public ApiResponse<CampaignResponse> schedule(@PathVariable long campaignId,
+		@Valid @RequestBody CampaignScheduleRequest request) {
+		Campaign campaign = campaignService.schedule(campaignId, request.scheduledAt());
+		return ApiResponse.ok(CampaignResponse.from(campaign));
+	}
+
+	@Operation(summary = "예약 취소", description = "SCHEDULED → DRAFT.")
+	@PreAuthorize("hasAnyRole('OWNER','MANAGER')")
+	@PostMapping("/{campaignId}/cancel-schedule")
+	public ApiResponse<CampaignResponse> cancelSchedule(@PathVariable long campaignId) {
+		Campaign campaign = campaignService.cancelSchedule(campaignId);
+		return ApiResponse.ok(CampaignResponse.from(campaign));
+	}
+
+	@Operation(summary = "즉시 시작", description = "DRAFT·SCHEDULED → ACTIVE. 일회성은 바로 큐에 적재한다.")
+	@PreAuthorize("hasAnyRole('OWNER','MANAGER')")
+	@PostMapping("/{campaignId}/start")
+	public ApiResponse<CampaignResponse> start(@PathVariable long campaignId) {
+		Campaign campaign = campaignService.start(campaignId);
 		return ApiResponse.ok(CampaignResponse.from(campaign));
 	}
 }

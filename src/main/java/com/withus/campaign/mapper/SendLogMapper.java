@@ -82,4 +82,7 @@ public interface SendLogMapper {
 
 	/** 재확인 이후 렌더링 단계에서 탈락(쿠폰 유효기간 밖): 종단 SKIPPED(COUPON_INVALID), 재시도하지 않는다 */
 	void recordSkippedCoupon(@Param("sendLogId") long sendLogId);
+
+	/** 전체 PENDING 대기 건수 — 새 캠페인 시작 전 예상 소요 시간 계산용(캠페인 3/4 estimate) */
+	long countPending();
 }
