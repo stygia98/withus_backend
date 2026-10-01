@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.withus.campaign.mapper.SendLogMapper">
+
+	<!--
+		SendLog 는 @Builder 전용 도메인(생성자가 전체 필드 1개뿐, no-arg 없음)이라 자동 매핑 대신
+		생성자 매핑을 쓴다. 순서는 SendLog.java 필드 선언 순서(= Lombok 이 만드는 생성자 인자 순서)와 같아야 한다.
+	-->
+	<resultMap id="sendLogResultMap" type="com.withus.campaign.domain.SendLog">
+		<constructor>
+			<idArg column="send_log_id" javaType="java.lang.Long"/>
+			<arg column="campaign_id" javaType="java.lang.Long"/>
+			<arg column="instance_id" javaType="java.lang.Long"/>
+			<arg column="step_id" javaType="java.lang.Long"/>
+			<arg column="customer_id" javaType="java.lang.Long"/>
+			<arg column="recipient" javaType="string"/>
+			<arg column="channel" javaType="com.withus.common.domain.Channel"/>
+			<arg column="ab_variant" javaType="string"/>
+			<arg column="status" javaType="com.withus.campaign.domain.SendStatus"/>
+			<arg column="kind" javaType="com.withus.campaign.domain.SendKind"/>
+			<!-- priority·attemptCount 는 생성자에서 원시형(short/int)이라 _short·_int(원시형 전용 별칭)를 써야 한다 -->
+			<arg column="priority" javaType="_short"/>
+			<arg column="provider_message_id" javaType="string"/>
+			<!-- UUID 는 기본 TypeHandler 가 없어 생성자 매핑 시 build 단계에서 바로 검증에 실패한다. UnknownTypeHandler 로 돌려 PG 드라이버가 ResultSet.getObject() 로 직접 UUID 를 주게 둔다 -->
+			<arg column="tracking_token" javaType="java.util.UUID" typeHandler="org.apache.ibatis.type.UnknownTypeHandler"/>
+			<arg column="attempt_count" javaType="_int"/>
+			<arg column="next_attempt_at" javaType="java.time.OffsetDateTime"/>
+			<arg column="error_message" javaType="string"/>
+			<arg column="sent_at" javaType="java.time.OffsetDateTime"/>
+			<arg column="created_at" javaType="java.time.OffsetDateTime"/>
+			<arg column="updated_at" javaType="java.time.OffsetDateTime"/>
+		</constructor>
+	</resultMap>
+
+	<select id="findRecipients" resultType="com.withus.campaign.domain.CustomerRecipient">
+		SELECT customer_id,
+			<choose>
+				<when test="channel == @com.withus.common.domain.Channel@EMAIL">email</when>
+				<otherwise>phone</otherwise>
+			</choose> AS recipient
+		FROM customer
+		WHERE deleted_yn = 'N'
+		AND customer_id IN
+		<foreach collection="customerIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+	</select>
+
+	<insert id="insertOneTimeBatch">
+		INSERT INTO send_log (campaign_id, instance_id, step_id, customer_id, recipient, channel, status, kind, priority)
+		VALUES
+		<foreach collection="logs" item="item" separator=",">
+			(#{item.campaignId}, #{item.instanceId}, #{item.stepId}, #{item.customerId}, #{item.recipient},
+			 #{item.channel}, #{item.status}, #{item.kind}, #{item.priority})
+		</foreach>
+		ON CONFLICT (campaign_id, customer_id) WHERE instance_id IS NULL DO NOTHING
+	</insert>
+
+	<insert id="insertWorkflowBatch">
+		INSERT INTO send_log (campaign_id, instance_id, step_id, customer_id, recipient, channel, status, kind, priority)
+		VALUES
+		<foreach collection="logs" item="item" separator=",">
+			(#{item.campaignId}, #{item.instanceId}, #{item.stepId}, #{item.customerId}, #{item.recipient},
+			 #{item.channel}, #{item.status}, #{item.kind}, #{item.priority})
+		</foreach>
+		ON CONFLICT ON CONSTRAINT uq_send_log_step DO NOTHING
+	</insert>
+
+	<!-- UPDATE ... RETURNING 은 select 로 선언해야 ResultSet 을 받는다 (MyBatis+PostgreSQL 관용 패턴) -->
+	<select id="claimBatch" resultMap="sendLogResultMap">
+		UPDATE send_log SET status = 'SENDING', updated_at = now()
+		WHERE send_log_id IN (
+			SELECT send_log_id FROM send_log
+			WHERE status = 'PENDING' AND (next_attempt_at IS NULL OR next_attempt_at &lt;= now())
+			  AND NOT EXISTS (
+			      SELECT 1 FROM campaign c
+			      WHERE c.campaign_id = send_log.campaign_id AND c.status = 'PAUSED'
+			  )
+			ORDER BY priority, send_log_id
+			LIMIT 50
+			FOR UPDATE SKIP LOCKED
+		)
+		RETURNING *
+	</select>
+
+	<update id="recordSent">
+		UPDATE send_log SET status = 'SENT', sent_at = now(), provider_message_id = #{providerMessageId}
+		WHERE send_log_id = #{sendLogId}
+	</update>
+
+	<update id="recordFailed">
+		UPDATE send_log SET status = 'FAILED', error_message = #{errorMessage}
+		WHERE send_log_id = #{sendLogId}
+	</update>
+
+	<select id="findByProviderMessageId" resultMap="sendLogResultMap">
+		SELECT * FROM send_log WHERE provider_message_id = #{providerMessageId}
+	</select>
+
+	<select id="findCampaignStatus" resultType="string">
+		SELECT status FROM campaign WHERE campaign_id = #{campaignId}
+	</select>
+
+	<update id="recordSkipped">
+		UPDATE send_log SET status = 'SKIPPED' WHERE send_log_id = #{sendLogId}
+	</update>
+
+	<update id="revertToPending">
+		UPDATE send_log SET status = 'PENDING' WHERE send_log_id = #{sendLogId}
+	</update>
+
+	<update id="holdForSendWindow">
+		UPDATE send_log SET status = 'PENDING', next_attempt_at = #{nextAttemptAt} WHERE send_log_id = #{sendLogId}
+	</update>
+
+	<update id="recordRetry">
+		UPDATE send_log SET status = 'PENDING', attempt_count = attempt_count + 1,
+			next_attempt_at = #{nextAttemptAt}, error_message = #{errorMessage}
+		WHERE send_log_id = #{sendLogId}
+	</update>
+
+	<update id="recoverStuckSending">
+		UPDATE send_log SET status = 'FAILED', error_message = 'UNKNOWN_RESULT'
+		WHERE status = 'SENDING' AND updated_at &lt; now() - interval '10 minutes'
+	</update>
+
+	<select id="findPlaceholderSource" resultType="com.withus.campaign.domain.CustomerPlaceholderSource">
+		SELECT name, email, region_code, total_purchase FROM customer WHERE customer_id = #{customerId}
+	</select>
+
+	<select id="findCouponIdByCampaignId" resultType="long">
+		SELECT coupon_id FROM campaign WHERE campaign_id = #{campaignId}
+	</select>
+
+	<select id="findCouponIdByStepId" resultType="long">
+		SELECT (config_json ->> 'couponId')::bigint FROM workflow_step WHERE step_id = #{stepId}
+	</select>
+
+	<select id="isCouponValid" resultType="boolean">
+		SELECT CURRENT_DATE BETWEEN valid_from AND valid_to FROM coupon WHERE coupon_id = #{couponId}
+	</select>
+
+	<update id="recordSkippedCoupon">
+		UPDATE send_log SET status = 'SKIPPED', error_message = 'COUPON_INVALID' WHERE send_log_id = #{sendLogId}
+	</update>
+</mapper>

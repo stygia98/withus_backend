@@ -28,4 +28,10 @@ public interface TemplateMapper {
 
 	/** 삭제 차단용: 상태와 무관하게 campaign.template_id 또는 workflow_step.config_json 이 참조하는가 */
 	boolean existsReferenced(long templateId);
+
+	/** 일회성 캠페인의 템플릿 ID (SendDispatcher 발송용) */
+	Long findTemplateIdByCampaignId(long campaignId);
+
+	/** 워크플로우 SEND 노드의 템플릿 ID — config_json.templateId (SendDispatcher 발송용) */
+	Long findTemplateIdByStepId(long stepId);
 }
