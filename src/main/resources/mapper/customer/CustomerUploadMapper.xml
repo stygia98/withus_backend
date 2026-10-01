@@ -3,7 +3,7 @@
 <mapper namespace="com.withus.customer.mapper.CustomerUploadMapper">
 
 	<select id="findActiveByEmails" resultType="com.withus.customer.domain.Customer">
-		SELECT customer_id, email, email_consent_yn, sms_consent_yn
+		SELECT customer_id, email, phone, email_consent_yn, sms_consent_yn
 		FROM customer
 		WHERE deleted_yn = 'N' AND email IN
 		<foreach collection="emails" item="e" open="(" separator="," close=")">#{e}</foreach>

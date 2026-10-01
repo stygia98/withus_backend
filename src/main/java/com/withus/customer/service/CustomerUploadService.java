@@ -81,9 +81,17 @@ public class CustomerUploadService {
 		List<String> emails = List.copyOf(byEmail.keySet());
 		Map<String, Customer> existing = new LinkedHashMap<>();
 		chunks(emails).forEach(c -> uploadMapper.findActiveByEmails(c).forEach(x -> existing.put(x.getEmail(), x)));
+		// 갱신 행의 빈 휴대폰 칸은 기존 번호가 유지되므로, 수신거부 판정도 기존 번호로 한다 (업로드로 해제 금지, 7장)
+		Map<String, String> phoneByEmail = new LinkedHashMap<>();
+		byEmail.values().forEach(v -> {
+			Customer old = existing.get(v.f().email());
+			String phone = v.f().phone() != null ? v.f().phone() : old == null ? null : old.getPhone();
+			if (phone != null) {
+				phoneByEmail.put(v.f().email(), phone);
+			}
+		});
 		Set<String> suppressed = new HashSet<>();
-		List<String> phones = byEmail.values().stream().map(v -> v.f().phone()).filter(Objects::nonNull).distinct()
-			.toList();
+		List<String> phones = phoneByEmail.values().stream().distinct().toList();
 		// 휴대폰은 이메일이 있는 행에서만 나오므로 개수가 이메일 이하다
 		for (int i = 0; i < emails.size(); i += CHUNK) {
 			suppressed.addAll(uploadMapper.findSuppressions(slice(emails, i), slice(phones, i)));
@@ -95,7 +103,7 @@ public class CustomerUploadService {
 		int suppressedRows = 0;
 		for (Valid v : byEmail.values()) {
 			boolean emailSup = suppressed.contains("EMAIL:" + v.f().email());
-			boolean smsSup = v.f().phone() != null && suppressed.contains("SMS:" + v.f().phone());
+			boolean smsSup = suppressed.contains("SMS:" + phoneByEmail.get(v.f().email()));
 			suppressedRows += emailSup || smsSup ? 1 : 0;
 			Customer old = existing.get(v.f().email());
 			if (old == null) {

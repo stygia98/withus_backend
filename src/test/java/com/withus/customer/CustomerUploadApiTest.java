@@ -118,6 +118,24 @@ class CustomerUploadApiTest {
 	}
 
 	@Test
+	void 휴대폰_칸을_비워도_기존_번호가_수신거부면_SMS_동의는_N_유지() throws Exception {
+		String phone = "010" + (10_000_000 + (int) (Math.random() * 89_999_999));
+		jdbc.update("""
+			INSERT INTO customer (email, phone, joined_at, sms_consent_yn, source)
+			VALUES (?, ?, DATE '2025-01-01', 'N', 'MANUAL')
+			""", mail("smsup"), phone);
+		jdbc.update("INSERT INTO suppression (channel, value, reason) VALUES ('SMS', ?, 'UNSUBSCRIBE')", phone);
+
+		String csv = HEADER + "\n,%s,,,,2026-09-01,,,Y".formatted(mail("smsup"));
+		upload("c.csv", csv.getBytes(StandardCharsets.UTF_8), Role.MANAGER)
+			.andExpect(jsonPath("$.data.updated").value(1))
+			.andExpect(jsonPath("$.data.suppressed").value(1));
+
+		assertThat(row(mail("smsup"))).containsEntry("phone", phone).containsEntry("sms_consent_yn", "N");
+		assertThat(history(mail("smsup"))).isEmpty();
+	}
+
+	@Test
 	void 엑셀에서_저장한_CP949_CSV() throws Exception {
 		String csv = HEADER + "\r\n홍길동," + mail("cp") + ",01055556666,서울특별시,,2026-09-01,,Y,Y\r\n";
 		upload("고객.csv", csv.getBytes(Charset.forName("MS949")), Role.OWNER)
