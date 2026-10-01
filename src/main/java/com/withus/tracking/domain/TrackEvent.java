@@ -2,12 +2,12 @@ package com.withus.tracking.domain;
 
 import java.time.OffsetDateTime;
 
+import lombok.Builder;
 import lombok.Getter;
-import lombok.Setter;
 
 /** track_event 테이블 (DB_SCHEMA 14·15번) */
 @Getter
-@Setter
+@Builder
 public class TrackEvent {
 
 	public static final String OPEN = "OPEN";
