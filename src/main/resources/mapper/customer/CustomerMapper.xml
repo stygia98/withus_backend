@@ -11,6 +11,10 @@
 		SELECT <include refid="columns"/> FROM customer WHERE customer_id = #{customerId} AND deleted_yn = 'N'
 	</select>
 
+	<select id="findById" resultType="com.withus.customer.domain.Customer">
+		SELECT <include refid="columns"/> FROM customer WHERE customer_id = #{customerId}
+	</select>
+
 	<select id="existsActiveEmail" resultType="boolean">
 		SELECT EXISTS (
 			SELECT 1 FROM customer
@@ -100,6 +104,28 @@
 	<delete id="deleteSuppression">
 		DELETE FROM suppression WHERE channel = #{channel} AND value = #{value}
 	</delete>
+
+	<insert id="insertSuppression">
+		INSERT INTO suppression (channel, value, reason) VALUES (#{channel}, #{value}, #{reason})
+		ON CONFLICT (channel, value) DO NOTHING
+	</insert>
+
+	<!-- UPDATE ... RETURNING 이라 select 로 둔다 (쓰기이므로 캐시 비움) -->
+	<select id="rejectConsentByValue" resultType="long" flushCache="true">
+		UPDATE customer SET
+		<choose>
+			<when test="channel == @com.withus.common.domain.Channel@EMAIL">
+				email_consent_yn = 'N', email_consent_at = NULL, updated_at = now()
+				WHERE email = #{value} AND email_consent_yn = 'Y'
+			</when>
+			<otherwise>
+				sms_consent_yn = 'N', sms_consent_at = NULL, updated_at = now()
+				WHERE phone = #{value} AND sms_consent_yn = 'Y'
+			</otherwise>
+		</choose>
+		AND deleted_yn = 'N'
+		RETURNING customer_id
+	</select>
 
 	<!-- 발송 큐 적재·발송 직전 재확인용 (PRD 8.2). 휴면은 보지 않는다 (F-11: 휴면도 발송 가능) -->
 	<select id="isSendable" resultType="boolean">
