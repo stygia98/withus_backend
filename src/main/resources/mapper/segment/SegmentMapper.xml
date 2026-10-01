@@ -31,6 +31,26 @@
 		SELECT count(*) FROM segment
 	</select>
 
+	<update id="update">
+		UPDATE segment SET name = #{name}, description = #{description}, updated_at = now()
+		WHERE segment_id = #{segmentId}
+	</update>
+
+	<update id="updateRule">
+		UPDATE segment_rule SET rule_json = CAST(#{ruleJson} AS jsonb), updated_at = now()
+		WHERE segment_id = #{segmentId}
+	</update>
+
+	<!-- campaign 은 팀원2 테이블 — 조회만 (workflow-git.md 타 도메인 조회 규칙) -->
+	<select id="existsCampaign" resultType="boolean">
+		SELECT EXISTS (SELECT 1 FROM campaign WHERE segment_id = #{segmentId})
+	</select>
+
+	<!-- segment_rule 은 ON DELETE CASCADE -->
+	<delete id="delete">
+		DELETE FROM segment WHERE segment_id = #{segmentId}
+	</delete>
+
 	<!--
 		세그먼트 규칙 조건 (docs/plans/segment-sql.md 5장). 대상 조회·대상 수·미리보기가 모두 이 조각을 쓴다
 		연결어·필드·연산자는 enum 비교로 고정 문자열만 출력하고(Plan 10장 R1), 값은 모두 #{} 로 바인딩한다
@@ -51,6 +71,7 @@
 				<if test="ci > 0"><bind name="op" value="g.operator"/><include refid="logical"/></if>
 				<choose>
 					<when test="c.field == @com.withus.segment.domain.SegmentField@REGION">region_code</when>
+					<when test="c.field == @com.withus.segment.domain.SegmentField@AGE">birth_date</when>
 					<when test="c.field == @com.withus.segment.domain.SegmentField@TOTAL_PURCHASE">total_purchase</when>
 					<when test="c.field == @com.withus.segment.domain.SegmentField@JOINED_AT">joined_at</when>
 					<when test="c.field == @com.withus.segment.domain.SegmentField@EMAIL_CONSENT">email_consent_yn</when>

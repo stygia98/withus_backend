@@ -8,7 +8,8 @@ import com.withus.common.exception.ErrorCode;
 public enum SegmentErrorCode implements ErrorCode {
 
 	SEGMENT_INVALID_RULE(HttpStatus.BAD_REQUEST, "세그먼트 조건이 올바르지 않습니다."),
-	SEGMENT_TOO_MANY_CONDITIONS(HttpStatus.BAD_REQUEST, "조건은 최대 10개까지 추가할 수 있습니다.");
+	SEGMENT_TOO_MANY_CONDITIONS(HttpStatus.BAD_REQUEST, "조건은 최대 10개까지 추가할 수 있습니다."),
+	SEGMENT_IN_USE(HttpStatus.CONFLICT, "이 세그먼트를 쓰는 캠페인이 있어 삭제할 수 없습니다.");
 
 	private final HttpStatus status;
 	private final String message;

@@ -70,6 +70,61 @@ class SegmentRuleTranslatorTest {
 	}
 
 	@Test
+	void 만_나이_BETWEEN_은_DB_SCHEMA_식과_같은_birth_date_범위() {
+		// age 20~34 @2026-10-01 → birth_date > 1991-10-01 AND <= 2006-10-01 (DB_SCHEMA 5.1)
+		assertThat(ageCondition("BETWEEN", "[20,34]")).isEqualTo(new Condition(SegmentField.AGE,
+			SegmentOperator.BETWEEN, LocalDate.of(1991, 10, 2), LocalDate.of(2006, 10, 1), null));
+	}
+
+	@Test
+	void 만_나이_단일_연산자_변환() {
+		assertThat(ageCondition("GTE", "20"))
+			.isEqualTo(Condition.single(SegmentField.AGE, SegmentOperator.LTE, LocalDate.of(2006, 10, 1)));
+		assertThat(ageCondition("GT", "20")).as("21세 이상")
+			.isEqualTo(Condition.single(SegmentField.AGE, SegmentOperator.LTE, LocalDate.of(2005, 10, 1)));
+		assertThat(ageCondition("LTE", "34")).as("35번째 생일 전까지")
+			.isEqualTo(Condition.single(SegmentField.AGE, SegmentOperator.GTE, LocalDate.of(1991, 10, 2)));
+		assertThat(ageCondition("LT", "35")).as("34세 이하와 같다")
+			.isEqualTo(ageCondition("LTE", "34"));
+		assertThat(ageCondition("EQ", "30")).isEqualTo(new Condition(SegmentField.AGE, SegmentOperator.BETWEEN,
+			LocalDate.of(1995, 10, 2), LocalDate.of(1996, 10, 1), null));
+	}
+
+	@Test
+	void 만_나이_생일_경계() {
+		// 2006-10-01 생은 오늘(2026-10-01) 생일이라 만 20세, 2006-10-02 생은 아직 19세
+		Condition c = ageCondition("GTE", "20");
+		LocalDate youngest = (LocalDate) c.value();
+		assertThat(LocalDate.of(2006, 10, 1)).isBeforeOrEqualTo(youngest);
+		assertThat(LocalDate.of(2006, 10, 2)).isAfter(youngest);
+	}
+
+	@Test
+	void 기준일이_2월_29일이면_평년은_2월_28일로_맞춘다() {
+		Condition c = SegmentRuleTranslator.translate(JSON.readTree(rule(
+			"{\"field\":\"age\",\"op\":\"GTE\",\"value\":1}")), LocalDate.of(2028, 2, 29)).groups().get(0)
+			.conditions().get(0);
+		assertThat(c.value()).isEqualTo(LocalDate.of(2027, 2, 28));
+	}
+
+	@Test
+	void 가입일_BETWEEN_과_지역_NE() {
+		Condition joined = translate(rule(
+			"{\"field\":\"joinedAt\",\"op\":\"BETWEEN\",\"value\":[\"2026-01-01\",\"2026-03-31\"]}"))
+			.groups().get(0).conditions().get(0);
+		assertThat(joined).isEqualTo(new Condition(SegmentField.JOINED_AT, SegmentOperator.BETWEEN,
+			LocalDate.of(2026, 1, 1), LocalDate.of(2026, 3, 31), null));
+		Condition ne = translate(rule("{\"field\":\"region\",\"op\":\"NE\",\"value\":\"SEOUL\"}"))
+			.groups().get(0).conditions().get(0);
+		assertThat(ne).isEqualTo(Condition.single(SegmentField.REGION, SegmentOperator.NE, "SEOUL"));
+	}
+
+	private static Condition ageCondition(String op, String value) {
+		return translate(rule("{\"field\":\"age\",\"op\":\"" + op + "\",\"value\":" + value + "}"))
+			.groups().get(0).conditions().get(0);
+	}
+
+	@Test
 	void 조건은_그룹_합계_10개까지() {
 		// 두 그룹 6 + 4 = 10개는 허용, 6 + 5 = 11개는 TOO_MANY
 		assertThat(translate(twoGroups(6, 4)).groups()).hasSize(2);
@@ -100,7 +155,14 @@ class SegmentRuleTranslatorTest {
 
 	@ParameterizedTest
 	@ValueSource(strings = {
-		"{\"field\":\"age\",\"op\":\"GTE\",\"value\":20}",
+		"{\"field\":\"age\",\"op\":\"IN\",\"value\":[20]}",
+		"{\"field\":\"age\",\"op\":\"GTE\",\"value\":151}",
+		"{\"field\":\"age\",\"op\":\"BETWEEN\",\"value\":[34,20]}",
+		"{\"field\":\"joinedAt\",\"op\":\"BETWEEN\",\"value\":[\"2026/01/01\",\"2026-02-01\"]}",
+		"{\"field\":\"joinedAt\",\"op\":\"BETWEEN\",\"value\":[\"2026-02-30\",\"2026-03-01\"]}",
+		"{\"field\":\"joinedAt\",\"op\":\"BETWEEN\",\"value\":[\"2026-03-01\",\"2026-02-01\"]}",
+		"{\"field\":\"joinedAt\",\"op\":\"BETWEEN\",\"value\":[\"2026-03-01\"]}",
+		"{\"field\":\"region\",\"op\":\"NE\",\"value\":[\"SEOUL\"]}",
 		"{\"field\":\"region\",\"op\":\"GT\",\"value\":\"SEOUL\"}",
 		"{\"field\":\"emailConsent\",\"op\":\"NE\",\"value\":\"Y\"}",
 		"{\"field\":\"totalPurchase\",\"op\":\"IN\",\"value\":[1]}",

@@ -9,6 +9,7 @@ import java.util.Set;
 
 import com.withus.common.exception.BusinessException;
 import com.withus.customer.domain.Region;
+import com.withus.customer.service.CustomerNormalizer;
 import com.withus.segment.domain.LogicalOperator;
 import com.withus.segment.domain.SegmentErrorCode;
 import com.withus.segment.domain.SegmentField;
@@ -27,6 +28,7 @@ public final class SegmentRuleTranslator {
 
 	static final int MAX_CONDITIONS = 10;
 	static final int MAX_LAST_DAYS = 3650;
+	static final int MAX_AGE = 150;
 
 	private SegmentRuleTranslator() {
 	}
@@ -94,20 +96,86 @@ public final class SegmentRuleTranslator {
 		return switch (field) {
 			case REGION -> op == SegmentOperator.IN
 				? new Condition(field, op, null, null, regions(v, vpath))
+				// Q1: NE 는 SQL 기본 동작대로 지역이 NULL 인 고객을 포함하지 않는다
 				: Condition.single(field, op, region(v, vpath));
-			case TOTAL_PURCHASE -> number(field, op, v, vpath, 0, Long.MAX_VALUE);
-			// Q2: 오늘 포함 N일 → joined_at > today - N
-			case JOINED_AT -> Condition.single(field, SegmentOperator.GT,
-				today.minusDays(integer(v, vpath, 1, MAX_LAST_DAYS)));
+			case AGE -> age(op, v, vpath, today);
+			case JOINED_AT -> op == SegmentOperator.BETWEEN
+				? dateRange(field, v, vpath)
+				// Q2: 오늘 포함 N일 → joined_at > today - N
+				: Condition.single(field, SegmentOperator.GT, today.minusDays(integer(v, vpath, 1, MAX_LAST_DAYS)));
+			case TOTAL_PURCHASE -> op == SegmentOperator.BETWEEN
+				? range(field, pair(v, vpath, 0, Long.MAX_VALUE))
+				: Condition.single(field, op, integer(v, vpath, 0, Long.MAX_VALUE));
 			case EMAIL_CONSENT, SMS_CONSENT, DORMANT -> Condition.single(field, op, yn(v, vpath));
 		};
 	}
 
-	private static Condition number(SegmentField field, SegmentOperator op, JsonNode v, String path, long min,
-		long max) {
-		if (op != SegmentOperator.BETWEEN) {
-			return Condition.single(field, op, integer(v, path, min, max));
+	/**
+	 * 만 나이 → birth_date 범위 (docs/plans/segment-sql.md 3장, DB_SCHEMA 5.1 식)
+	 * 나이 [min, max] ⇔ birth_date > today-(max+1)년 AND birth_date <= today-min년
+	 * 앞쪽 > 는 하루 더해 >= 로 바꿔 BETWEEN·GTE·LTE 만 쓴다. birth_date 가 NULL 이면 빠진다
+	 */
+	private static Condition age(SegmentOperator op, JsonNode v, String path, LocalDate today) {
+		Long min;
+		Long max;
+		if (op == SegmentOperator.BETWEEN) {
+			long[] p = pair(v, path, 0, MAX_AGE);
+			min = p[0];
+			max = p[1];
+		} else {
+			long n = integer(v, path, 0, MAX_AGE);
+			min = switch (op) {
+				case EQ, GTE -> n;
+				case GT -> n + 1;
+				default -> null;
+			};
+			max = switch (op) {
+				case EQ, LTE -> n;
+				case LT -> n - 1;
+				default -> null;
+			};
 		}
+		LocalDate oldest = max == null ? null : today.minusYears(max + 1).plusDays(1);
+		LocalDate youngest = min == null ? null : today.minusYears(min);
+		if (oldest != null && youngest != null) {
+			return new Condition(SegmentField.AGE, SegmentOperator.BETWEEN, oldest, youngest, null);
+		}
+		return oldest != null
+			? Condition.single(SegmentField.AGE, SegmentOperator.GTE, oldest)
+			: Condition.single(SegmentField.AGE, SegmentOperator.LTE, youngest);
+	}
+
+	/** ["YYYY-MM-DD","YYYY-MM-DD"] 양 끝 포함. 날짜 형식은 고객 입력 정규화와 같은 규칙 */
+	private static Condition dateRange(SegmentField field, JsonNode v, String path) {
+		if (v == null || !v.isArray() || v.size() != 2) {
+			throw invalid(path, "BETWEEN 은 [시작일, 종료일] 두 값이어야 합니다.");
+		}
+		LocalDate from = date(v.get(0), path + "[0]");
+		LocalDate to = date(v.get(1), path + "[1]");
+		if (from.isAfter(to)) {
+			throw invalid(path, "시작일이 종료일보다 늦습니다.");
+		}
+		return new Condition(field, SegmentOperator.BETWEEN, from, to, null);
+	}
+
+	private static LocalDate date(JsonNode v, String path) {
+		try {
+			LocalDate d = CustomerNormalizer.date(text(v));
+			if (d != null) {
+				return d;
+			}
+		} catch (BusinessException e) {
+			// 고객 오류 코드(CUSTOMER_INVALID_DATE) 대신 세그먼트 오류 + 위치로 알린다
+		}
+		throw invalid(path, "날짜는 YYYY-MM-DD 형식이어야 합니다.");
+	}
+
+	private static Condition range(SegmentField field, long[] p) {
+		return new Condition(field, SegmentOperator.BETWEEN, p[0], p[1], null);
+	}
+
+	/** BETWEEN 정수 [최소, 최대] */
+	private static long[] pair(JsonNode v, String path, long min, long max) {
 		if (v == null || !v.isArray() || v.size() != 2) {
 			throw invalid(path, "BETWEEN 은 [최소, 최대] 두 값이어야 합니다.");
 		}
@@ -116,7 +184,7 @@ public final class SegmentRuleTranslator {
 		if (lo > hi) {
 			throw invalid(path, "최소값이 최대값보다 큽니다.");
 		}
-		return new Condition(field, op, lo, hi, null);
+		return new long[] { lo, hi };
 	}
 
 	private static long integer(JsonNode v, String path, long min, long max) {
