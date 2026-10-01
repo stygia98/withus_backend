@@ -13,6 +13,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import com.withus.auth.domain.AuthErrorCode;
@@ -43,6 +44,12 @@ public class GlobalExceptionHandler {
 	@ExceptionHandler({ HttpMessageNotReadableException.class, MethodArgumentTypeMismatchException.class })
 	public ResponseEntity<ApiResponse<Void>> handleBadRequest(Exception e) {
 		return toResponse(CommonErrorCode.COMMON_INVALID_INPUT, CommonErrorCode.COMMON_INVALID_INPUT.message(), null);
+	}
+
+	/** multipart 한도 초과는 컨트롤러 전에 나므로 서비스의 크기 검사 대신 여기서 400 으로 바꾼다 (API_SPEC 12장) */
+	@ExceptionHandler(MaxUploadSizeExceededException.class)
+	public ResponseEntity<ApiResponse<Void>> handleTooLarge(MaxUploadSizeExceededException e) {
+		return toResponse(CommonErrorCode.UPLOAD_FILE_TOO_LARGE, CommonErrorCode.UPLOAD_FILE_TOO_LARGE.message(), null);
 	}
 
 	@ExceptionHandler(NoResourceFoundException.class)
