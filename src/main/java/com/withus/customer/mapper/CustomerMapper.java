@@ -49,4 +49,7 @@ public interface CustomerMapper {
 
 	/** 최신순 */
 	List<ConsentHistory> findConsentHistory(long customerId);
+
+	/** 삭제되지 않았고, 채널 동의 Y 이고, 그 채널 값이 suppression 에 없으면 true. 쿼리 1회 */
+	boolean isSendable(@Param("customerId") long customerId, @Param("channel") Channel channel);
 }
