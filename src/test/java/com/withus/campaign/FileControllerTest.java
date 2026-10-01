@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -112,8 +111,10 @@ class FileControllerTest {
 	void 인증_없이_업로드하면_401() throws Exception {
 		MockMultipartFile file = new MockMultipartFile("file", "선물.jpg", "image/jpeg", "x".getBytes());
 
-		// CSRF 는 통과시켜야 인증 부재로 인한 401 을 검증할 수 있다 (CSRF 필터가 인증보다 먼저 막아 403 이 되는 것 방지)
-		mvc.perform(multipart("/api/v1/files/images").file(file).with(csrf()))
+		// 인증 부재로 인한 401 을 보려면 CSRF 는 실제 쿠키로 통과시켜야 한다
+		// (SecurityMockMvcRequestPostProcessors.csrf() 는 공유 스프링 컨텍스트의 CSRF 저장소를 오염시켜
+		//  이후 테스트의 GET /auth/csrf 가 XSRF-TOKEN 쿠키를 못 받는 부작용이 있었다 — PL 리뷰로 확인)
+		mvc.perform(multipart("/api/v1/files/images").file(file).cookie(xsrf).header("X-XSRF-TOKEN", xsrf.getValue()))
 			.andExpect(status().isUnauthorized());
 	}
 }
