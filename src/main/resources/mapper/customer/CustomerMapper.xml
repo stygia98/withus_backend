@@ -113,6 +113,7 @@
 				</when>
 				<otherwise>
 					AND c.sms_consent_yn = 'Y'
+					AND c.phone IS NOT NULL
 					AND NOT EXISTS (SELECT 1 FROM suppression s WHERE s.channel = 'SMS' AND s.value = c.phone)
 				</otherwise>
 			</choose>
