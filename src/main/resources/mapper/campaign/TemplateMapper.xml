@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.withus.campaign.mapper.TemplateMapper">
+
+	<sql id="columns">
+		template_id, channel, name, subject, body, ad_yn, created_by, created_at, updated_at
+	</sql>
+
+	<select id="findList" resultType="com.withus.campaign.domain.Template">
+		SELECT <include refid="columns"/> FROM template
+		<where>
+			<if test="channel != null">channel = #{channel}</if>
+		</where>
+		ORDER BY template_id DESC
+		LIMIT #{limit} OFFSET #{offset}
+	</select>
+
+	<select id="count" resultType="long">
+		SELECT count(*) FROM template
+		<where>
+			<if test="channel != null">channel = #{channel}</if>
+		</where>
+	</select>
+
+	<select id="findById" resultType="com.withus.campaign.domain.Template">
+		SELECT <include refid="columns"/> FROM template WHERE template_id = #{templateId}
+	</select>
+
+	<insert id="insert" useGeneratedKeys="true" keyProperty="templateId" keyColumn="template_id">
+		INSERT INTO template (channel, name, subject, body, ad_yn, created_by)
+		VALUES (#{channel}, #{name}, #{subject}, #{body}, #{adYn}, #{createdBy})
+	</insert>
+
+	<update id="update">
+		UPDATE template
+		SET name = #{name}, subject = #{subject}, body = #{body}, ad_yn = #{adYn}, updated_at = now()
+		WHERE template_id = #{templateId}
+	</update>
+
+	<delete id="delete">
+		DELETE FROM template WHERE template_id = #{templateId}
+	</delete>
+
+	<select id="existsInUseByStatus" resultType="boolean">
+		SELECT EXISTS (
+			SELECT 1 FROM campaign c
+			WHERE c.status IN ('SCHEDULED', 'ACTIVE', 'PAUSED')
+			  AND (
+			      c.template_id = #{templateId}
+			      OR EXISTS (
+			          SELECT 1 FROM workflow_step ws
+			          WHERE ws.campaign_id = c.campaign_id
+			            AND ws.config_json ->> 'templateId' = #{templateId}::text
+			      )
+			  )
+		)
+	</select>
+
+	<select id="existsReferenced" resultType="boolean">
+		SELECT EXISTS (
+			SELECT 1 FROM campaign WHERE template_id = #{templateId}
+			UNION ALL
+			SELECT 1 FROM workflow_step WHERE config_json ->> 'templateId' = #{templateId}::text
+		)
+	</select>
+</mapper>
