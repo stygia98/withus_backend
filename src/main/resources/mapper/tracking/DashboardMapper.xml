@@ -15,6 +15,9 @@
 			<if test="campaignId != null">
 			  AND s.campaign_id = #{campaignId}
 			</if>
+			<if test="stepId != null">
+			  AND s.step_id = #{stepId}
+			</if>
 			<if test="from != null">
 			  AND COALESCE(s.sent_at, s.updated_at) &gt;= #{from}
 			</if>
@@ -77,5 +80,27 @@
 
 	<select id="campaignName" resultType="string">
 		SELECT name FROM campaign WHERE campaign_id = #{campaignId}
+	</select>
+
+	<select id="campaignType" resultType="string">
+		SELECT type FROM campaign WHERE campaign_id = #{campaignId}
+	</select>
+
+	<!--
+		config_json 의 templateId·couponId 는 숫자일 때만 쓴다 (DB_SCHEMA 5.2, TrackLinkMapper 와 같은 방어).
+		단계 순서는 step_id 순 — 워크플로우 저장 시 노드 배열 순서로 만들어진다.
+	-->
+	<select id="sendSteps" resultType="com.withus.tracking.domain.SendStepRow">
+		SELECT ws.step_id, ws.node_type, t.template_id, t.name AS template_name,
+		       CASE WHEN ws.config_json ->> 'couponId' ~ '^[0-9]{1,18}$'
+		            THEN CAST(ws.config_json ->> 'couponId' AS bigint) END AS coupon_id
+		FROM workflow_step ws
+		-- AND 는 계산 순서가 보장되지 않아 CASE 로 감싼다 (숫자가 아니면 CAST 하지 않음)
+		LEFT JOIN template t
+		       ON t.template_id = CASE WHEN ws.config_json ->> 'templateId' ~ '^[0-9]{1,18}$'
+		                               THEN CAST(ws.config_json ->> 'templateId' AS bigint) END
+		WHERE ws.campaign_id = #{campaignId}
+		  AND ws.node_type IN ('SEND_EMAIL', 'SEND_SMS')
+		ORDER BY ws.step_id
 	</select>
 </mapper>

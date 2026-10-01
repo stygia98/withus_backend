@@ -12,7 +12,7 @@
 ```
 - Swagger UI: http://localhost:8080/swagger-ui/index.html
 - Mailpit: http://localhost:8025
-- `local` 프로필은 `../infra/.env` 를 읽는다. 없으면 OS 환경변수 `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`, `JWT_SECRET`(32자 이상, 필수), `OWNER_EMAIL`, `OWNER_PASSWORD` 를 쓴다.
+- `local` 프로필은 `../infra/.env` 를 읽는다. 없으면 OS 환경변수 `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`, `JWT_SECRET`(32자 이상, 필수), `OWNER_EMAIL`, `OWNER_PASSWORD` 를 쓴다. `HMAC_SECRET`(수신거부 토큰 서명 키, 32자 이상)은 운영 필수이고 local 은 없으면 개발용 값을 쓴다.
 
 ## 팀원용 사용법
 

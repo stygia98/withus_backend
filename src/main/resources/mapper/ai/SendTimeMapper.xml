@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.withus.ai.mapper.SendTimeMapper">
+
+	<!-- 세션 타임존이 Asia/Seoul 이라 EXTRACT 는 한국 시각 기준이다. 사람 이벤트·캠페인 발송만 (CLAUDE.md 6장 8번) -->
+	<select id="engagementByDayHour" resultType="com.withus.ai.domain.HourlyEngagement">
+		SELECT CAST(EXTRACT(ISODOW FROM e.occurred_at) AS int) AS iso_day_of_week,
+		       CAST(EXTRACT(HOUR FROM e.occurred_at) AS int)   AS hour,
+		       count(*) FILTER (WHERE e.event_type = 'OPEN')    AS opens,
+		       count(*) FILTER (WHERE e.event_type = 'CLICK')   AS clicks
+		FROM track_event e
+		JOIN send_log s ON s.send_log_id = e.send_log_id
+		WHERE e.bot_yn = 'N'
+		  AND s.kind = 'CAMPAIGN'
+		  AND e.occurred_at &gt;= #{since}
+		GROUP BY 1, 2
+	</select>
+
+	<select id="countPending" resultType="long" flushCache="true">
+		SELECT count(*) FROM send_log WHERE status = 'PENDING'
+	</select>
+</mapper>
