@@ -83,8 +83,10 @@ class CustomerListApiTest {
 
 	@Test
 	void 검색어의_와일드카드는_문자_그대로_찾는다() throws Exception {
-		list("keyword=%25" + tag).andExpect(jsonPath("$.data.totalElements").value(0));
-		list("keyword=_" + tag.substring(1)).andExpect(jsonPath("$.data.totalElements").value(0));
+		// 쿼리 문자열에 %25 를 직접 쓰면 MockMvc 가 다시 인코딩해 % 가 서버에 닿지 않는다 → param 으로 넘긴다
+		call(get("/api/v1/customers").param("keyword", "%" + tag)).andExpect(jsonPath("$.data.totalElements").value(0));
+		call(get("/api/v1/customers").param("keyword", "_" + tag.substring(1)))
+			.andExpect(jsonPath("$.data.totalElements").value(0));
 	}
 
 	@Test
