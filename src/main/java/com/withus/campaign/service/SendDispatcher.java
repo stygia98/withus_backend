@@ -1,7 +1,9 @@
 package com.withus.campaign.service;
 
+import java.time.Duration;
 import java.time.LocalTime;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -15,6 +17,7 @@ import com.withus.campaign.domain.SendLog;
 import com.withus.campaign.domain.Template;
 import com.withus.campaign.mapper.SendLogMapper;
 import com.withus.campaign.mapper.TemplateMapper;
+import com.withus.campaign.service.messaging.ErrorType;
 import com.withus.campaign.service.messaging.MessageSenderRouter;
 import com.withus.campaign.service.messaging.OutboundMessage;
 import com.withus.campaign.service.messaging.SendResult;
@@ -32,6 +35,10 @@ public class SendDispatcher {
 
 	/** 한 번 실행(dispatch 호출)에 처리할 건수 상한 — 스케줄러 풀(5)을 오래 점유하지 않게 한다 */
 	private static final int MAX_PER_RUN = 200;
+
+	/** attempt_count(재시도 후 값) 1·2·3 회차의 재시도 간격. 4회째는 재시도 없이 FAILED(발송 큐 Plan 8장) */
+	private static final Duration[] RETRY_INTERVALS = { Duration.ofMinutes(1), Duration.ofMinutes(5),
+		Duration.ofMinutes(15) };
 
 	private final SendLogMapper sendLogMapper;
 	private final TemplateMapper templateMapper;
@@ -93,9 +100,23 @@ public class SendDispatcher {
 		SendResult result = messageSenderRouter.send(message);
 		if (result.success()) {
 			sendLogMapper.recordSent(sendLog.getSendLogId(), result.providerMessageId());
+		} else if (result.errorType() == ErrorType.TRANSIENT) {
+			retryOrFail(sendLog, result);
 		} else {
 			sendLogMapper.recordFailed(sendLog.getSendLogId(), result.errorMessage());
 		}
+	}
+
+	/** 일시 오류(TRANSIENT): 1·5·15분 뒤 재시도, 3회 넘으면 FAILED(발송 큐 Plan 8장) */
+	private void retryOrFail(SendLog sendLog, SendResult result) {
+		int nextAttemptCount = sendLog.getAttemptCount() + 1;
+		if (nextAttemptCount > RETRY_INTERVALS.length) {
+			sendLogMapper.recordFailed(sendLog.getSendLogId(), result.errorMessage());
+			return;
+		}
+		OffsetDateTime nextAttemptAt = OffsetDateTime.now(ZoneId.of("Asia/Seoul"))
+			.plus(RETRY_INTERVALS[nextAttemptCount - 1]);
+		sendLogMapper.recordRetry(sendLog.getSendLogId(), nextAttemptAt, result.errorMessage());
 	}
 
 	/**

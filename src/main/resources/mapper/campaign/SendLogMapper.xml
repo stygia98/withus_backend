@@ -80,4 +80,15 @@
 	<update id="holdForSendWindow">
 		UPDATE send_log SET status = 'PENDING', next_attempt_at = #{nextAttemptAt} WHERE send_log_id = #{sendLogId}
 	</update>
+
+	<update id="recordRetry">
+		UPDATE send_log SET status = 'PENDING', attempt_count = attempt_count + 1,
+			next_attempt_at = #{nextAttemptAt}, error_message = #{errorMessage}
+		WHERE send_log_id = #{sendLogId}
+	</update>
+
+	<update id="recoverStuckSending">
+		UPDATE send_log SET status = 'FAILED', error_message = 'UNKNOWN_RESULT'
+		WHERE status = 'SENDING' AND updated_at &lt; now() - interval '10 minutes'
+	</update>
 </mapper>

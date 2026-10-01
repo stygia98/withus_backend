@@ -56,4 +56,14 @@ public interface SendLogMapper {
 
 	/** 발송 시간창(08:00~20:50) 밖 보류: attempt_count 는 올리지 않고 next_attempt_at 만 설정한다(발송 큐 Plan 8장) */
 	void holdForSendWindow(@Param("sendLogId") long sendLogId, @Param("nextAttemptAt") OffsetDateTime nextAttemptAt);
+
+	/** 일시 오류(TRANSIENT) 재시도: attempt_count+1, next_attempt_at 설정, PENDING 으로 되돌린다(발송 큐 Plan 8장) */
+	void recordRetry(@Param("sendLogId") long sendLogId, @Param("nextAttemptAt") OffsetDateTime nextAttemptAt,
+		@Param("errorMessage") String errorMessage);
+
+	/**
+	 * SENDING 으로 10분 넘게 남은 건을 FAILED(UNKNOWN_RESULT) 로 되돌린다(재발송하지 않음, DB_SCHEMA 7장).
+	 * @return 복구된 건수
+	 */
+	int recoverStuckSending();
 }
