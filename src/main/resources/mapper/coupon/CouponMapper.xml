@@ -58,17 +58,17 @@
 		SELECT CAST(token AS text) FROM coupon_issue WHERE send_log_id = #{sendLogId}
 	</select>
 
-	<!-- 조건을 UPDATE 한 문장에 넣어 두 번 눌러도 한 번만 성공한다 (조회 후 갱신하면 경합에서 둘 다 통과) -->
+	<!-- 조건을 UPDATE 한 문장에 넣어 두 번 눌러도 한 번만 성공한다 (조회 후 갱신하면 경합에서 둘 다 통과). 고객 사용하기는 오늘 기준 -->
 	<sql id="usableCondition">
 		i.used_at IS NULL
 		AND c.coupon_id = i.coupon_id
 		AND #{today} BETWEEN c.valid_from AND c.valid_to
 	</sql>
 
+	<!-- 관리자 구매 경로: 기간은 구매일 기준으로 호출하는 쪽이 판정하므로 미사용만 확인한다 (PL 리뷰 #16) -->
 	<update id="markUsedById">
-		UPDATE coupon_issue i SET used_at = now(), updated_at = now()
-		FROM coupon c
-		WHERE i.issue_id = #{issueId} AND <include refid="usableCondition"/>
+		UPDATE coupon_issue SET used_at = now(), updated_at = now()
+		WHERE issue_id = #{issueId} AND used_at IS NULL
 	</update>
 
 	<update id="markUsedByToken">

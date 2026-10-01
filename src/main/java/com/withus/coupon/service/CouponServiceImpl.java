@@ -1,8 +1,5 @@
 package com.withus.coupon.service;
 
-import java.time.Clock;
-import java.time.LocalDate;
-import java.time.ZoneId;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
@@ -20,15 +17,9 @@ import com.withus.coupon.mapper.CouponMapper;
 public class CouponServiceImpl implements CouponService {
 
 	private final CouponMapper couponMapper;
-	private Clock clock = Clock.system(ZoneId.of("Asia/Seoul"));
 
 	public CouponServiceImpl(CouponMapper couponMapper) {
 		this.couponMapper = couponMapper;
-	}
-
-	/** 테스트에서 '오늘'을 고정할 때만 쓴다 */
-	void setClock(Clock clock) {
-		this.clock = clock;
 	}
 
 	/**
@@ -42,17 +33,17 @@ public class CouponServiceImpl implements CouponService {
 		return UUID.fromString(couponMapper.findTokenBySendLog(sendLogId));
 	}
 
-	/** 미사용이고 오늘이 유효기간 안이어야 한다. 고객 일치 여부는 호출하는 쪽(구매 등록)이 확인한다 */
+	/** 미사용인지만 확인한다. 유효기간(구매일 기준)과 고객 일치는 호출하는 쪽(구매 등록)이 판정한다 */
 	@Override
 	@Transactional
 	public void markUsed(long couponIssueId) {
-		if (couponMapper.markUsedById(couponIssueId, today()) == 1) {
+		if (couponMapper.markUsedById(couponIssueId) == 1) {
 			return;
 		}
 		throw failureOf(couponMapper.findIssueById(couponIssueId));
 	}
 
-	/** 사용 처리가 0건일 때 사유를 가린다: 없음 404, 이미 사용 409, 그 외(기간 밖) 422 */
+	/** 사용 처리가 0건일 때 사유를 가린다: 없음 404, 이미 사용 409, 그 외(고객 사용하기의 기간 밖) 422 */
 	static BusinessException failureOf(CouponIssueRow issue) {
 		if (issue == null) {
 			return new BusinessException(CouponErrorCode.COUPON_NOT_FOUND);
@@ -61,9 +52,5 @@ public class CouponServiceImpl implements CouponService {
 			return new BusinessException(CouponErrorCode.COUPON_ALREADY_USED);
 		}
 		return new BusinessException(CouponErrorCode.COUPON_NOT_USABLE);
-	}
-
-	private LocalDate today() {
-		return LocalDate.now(clock);
 	}
 }

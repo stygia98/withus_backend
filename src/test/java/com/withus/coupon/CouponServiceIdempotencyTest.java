@@ -135,7 +135,8 @@ class CouponServiceIdempotencyTest {
 	}
 
 	@Test
-	void markUsed는_기간이_지난_쿠폰을_거절한다() {
+	void markUsed는_유효기간을_검사하지_않는다_구매일_판정은_호출하는_쪽() {
+		// 구매 등록은 구매일 기준으로 기간을 본다(PRD F-10 ①). 오늘 기준으로 막으면 지난 구매 등록이 롤백된다 (PL 리뷰 #16)
 		long sendLogId = newSendLog();
 		service.issue(couponId, customerId, sendLogId);
 		long issueId = jdbc.queryForObject("SELECT issue_id FROM coupon_issue WHERE send_log_id = ?", Long.class, sendLogId);
@@ -143,9 +144,10 @@ class CouponServiceIdempotencyTest {
 		jdbc.update("UPDATE coupon SET valid_from = ?, valid_to = ? WHERE coupon_id = ?",
 			today.minusDays(10), today.minusDays(1), couponId);
 
-		assertThatThrownBy(() -> service.markUsed(issueId))
-			.extracting(e -> ((BusinessException) e).getErrorCode())
-			.isEqualTo(CouponErrorCode.COUPON_NOT_USABLE);
+		service.markUsed(issueId);
+
+		assertThat(jdbc.queryForObject("SELECT used_at IS NOT NULL FROM coupon_issue WHERE issue_id = ?", Boolean.class,
+			issueId)).isTrue();
 	}
 
 	@Test

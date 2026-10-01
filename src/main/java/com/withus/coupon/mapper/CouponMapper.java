@@ -39,9 +39,10 @@ public interface CouponMapper {
 
 	String findTokenBySendLog(@Param("sendLogId") long sendLogId);
 
-	/** 미사용이고 today 가 유효기간 안일 때만 사용 처리한다. 바뀐 행 수(0 또는 1) */
-	int markUsedById(@Param("issueId") long issueId, @Param("today") LocalDate today);
+	/** 관리자 구매 경로: 미사용일 때만 사용 처리한다(기간은 호출하는 쪽이 구매일로 판정). 바뀐 행 수(0 또는 1) */
+	int markUsedById(@Param("issueId") long issueId);
 
+	/** 고객 사용하기: 미사용이고 today 가 유효기간 안일 때만 사용 처리한다. 바뀐 행 수(0 또는 1) */
 	int markUsedByToken(@Param("token") String token, @Param("today") LocalDate today);
 
 	CouponIssueRow findIssueById(@Param("issueId") long issueId);
