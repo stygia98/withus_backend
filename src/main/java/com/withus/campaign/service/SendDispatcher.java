@@ -1,7 +1,10 @@
 package com.withus.campaign.service;
 
+import java.time.LocalTime;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -35,17 +38,21 @@ public class SendDispatcher {
 	private final MessageSenderRouter messageSenderRouter;
 	private final ConsentService consentService;
 	private final TokenBucket tokenBucket;
+	private final SendWindow sendWindow;
 	private final boolean schedulerEnabled;
 
 	public SendDispatcher(SendLogMapper sendLogMapper, TemplateMapper templateMapper,
 			MessageSenderRouter messageSenderRouter, ConsentService consentService,
 			@Value("${ses.max-send-rate}") int maxSendRate,
+			@Value("${withus.send-window.start}") String sendWindowStart,
+			@Value("${withus.send-window.end}") String sendWindowEnd,
 			@Value("${withus.scheduler.send-dispatcher.enabled:true}") boolean schedulerEnabled) {
 		this.sendLogMapper = sendLogMapper;
 		this.templateMapper = templateMapper;
 		this.messageSenderRouter = messageSenderRouter;
 		this.consentService = consentService;
 		this.tokenBucket = new TokenBucket(maxSendRate);
+		this.sendWindow = new SendWindow(LocalTime.parse(sendWindowStart), LocalTime.parse(sendWindowEnd));
 		this.schedulerEnabled = schedulerEnabled;
 	}
 
@@ -76,11 +83,13 @@ public class SendDispatcher {
 
 	/** 선점된 한 건을 트랜잭션 밖에서 처리하고 결과를 기록한다 */
 	public void processOne(SendLog sendLog) {
-		if (!recheck(sendLog)) {
-			return; // recheck 안에서 SKIPPED 또는 PENDING 복귀를 이미 기록했다
+		// NOTICE 는 campaign_id 가 없어 템플릿이 없다(F-12, 아직 적재 경로가 없는 미래 작업)
+		Template template = sendLog.getKind() == SendKind.NOTICE ? null : resolveTemplate(sendLog);
+		if (!recheck(sendLog, template)) {
+			return; // recheck 안에서 SKIPPED·PENDING 복귀·시간창 보류를 이미 기록했다
 		}
 		tokenBucket.acquire();
-		OutboundMessage message = buildMessage(sendLog);
+		OutboundMessage message = buildMessage(sendLog, template);
 		SendResult result = messageSenderRouter.send(message);
 		if (result.success()) {
 			sendLogMapper.recordSent(sendLog.getSendLogId(), result.providerMessageId());
@@ -90,13 +99,15 @@ public class SendDispatcher {
 	}
 
 	/**
-	 * 발송 직전 재확인(SendRecheck, 발송 큐 Plan 7장 1~5번). 통과하면 true.
-	 * TEST(customer_id NULL)는 고객 관련 확인(1~3번)을 건너뛴다.
-	 * 시간창(6번)·쿠폰 유효기간(7번)은 재확인 2/3·렌더링 작업에서 끼워 넣는다.
+	 * 발송 직전 재확인(SendRecheck, 발송 큐 Plan 7장 1~6번). 통과하면 true.
+	 * TEST(customer_id NULL)는 고객 관련 확인(1~3번)과 시간창(6번)을 모두 건너뛴다.
+	 * 쿠폰 유효기간(7번)은 렌더링 작업에서 끼워 넣는다.
 	 */
-	private boolean recheck(SendLog sendLog) {
-		if (sendLog.getKind() != SendKind.TEST
-				&& !consentService.isSendable(sendLog.getCustomerId(), sendLog.getChannel())) {
+	private boolean recheck(SendLog sendLog, Template template) {
+		if (sendLog.getKind() == SendKind.TEST) {
+			return true;
+		}
+		if (!consentService.isSendable(sendLog.getCustomerId(), sendLog.getChannel())) {
 			// isSendable 하나로 고객 삭제·수신동의 N·suppression 세 가지를 한꺼번에 본다(Plan 15장 B1)
 			sendLogMapper.recordSkipped(sendLog.getSendLogId());
 			return false;
@@ -111,14 +122,25 @@ public class SendDispatcher {
 			sendLogMapper.revertToPending(sendLog.getSendLogId());
 			return false;
 		}
+		boolean adOrNotice = sendLog.getKind() == SendKind.NOTICE || (template != null && template.isAd());
+		if (adOrNotice) {
+			Optional<OffsetDateTime> holdUntil = sendWindow.holdUntil();
+			if (holdUntil.isPresent()) {
+				sendLogMapper.holdForSendWindow(sendLog.getSendLogId(), holdUntil.get());
+				return false;
+			}
+		}
 		return true;
 	}
 
-	private OutboundMessage buildMessage(SendLog sendLog) {
+	private Template resolveTemplate(SendLog sendLog) {
 		Long templateId = sendLog.getStepId() != null
 			? templateMapper.findTemplateIdByStepId(sendLog.getStepId())
 			: templateMapper.findTemplateIdByCampaignId(sendLog.getCampaignId());
-		Template template = templateMapper.findById(templateId);
+		return templateMapper.findById(templateId);
+	}
+
+	private OutboundMessage buildMessage(SendLog sendLog, Template template) {
 		return new OutboundMessage(sendLog.getChannel(), sendLog.getRecipient(), template.getSubject(),
 			template.getBody(), Map.of());
 	}

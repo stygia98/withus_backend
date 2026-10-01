@@ -76,4 +76,8 @@
 	<update id="revertToPending">
 		UPDATE send_log SET status = 'PENDING' WHERE send_log_id = #{sendLogId}
 	</update>
+
+	<update id="holdForSendWindow">
+		UPDATE send_log SET status = 'PENDING', next_attempt_at = #{nextAttemptAt} WHERE send_log_id = #{sendLogId}
+	</update>
 </mapper>

@@ -158,7 +158,7 @@ class SendDispatcherTest {
 
 		// 재시작을 흉내낸다: 완전히 새 SendDispatcher 인스턴스로 다시 호출해도 더 처리할 PENDING 이 없어야 한다
 		SendDispatcher restarted = new SendDispatcher(sendLogMapper, templateMapper, messageSenderRouter,
-			consentService, 1, false);
+			consentService, 1, "08:00", "20:50", false);
 		restarted.dispatch();
 
 		Long pendingCount = jdbcTemplate.queryForObject(
@@ -206,6 +206,25 @@ class SendDispatcherTest {
 		return jdbcTemplate.queryForObject(
 			"SELECT send_log_id FROM send_log WHERE campaign_id = ? AND customer_id = ?", Long.class, campaignId,
 			customerId);
+	}
+
+	@Test
+	void TEST_발송은_시간창과_무관하게_즉시_나간다() {
+		SendLog testLog = SendLog.builder()
+			.campaignId(campaignId)
+			.recipient("tester@withus.local")
+			.channel(Channel.EMAIL)
+			.status(SendStatus.PENDING)
+			.kind(SendKind.TEST)
+			.priority(SendLog.PRIORITY_TEST)
+			.build();
+		sendLogMapper.insertOneTimeBatch(List.of(testLog));
+
+		sendDispatcher.dispatch();
+
+		String status = jdbcTemplate.queryForObject(
+			"SELECT status FROM send_log WHERE campaign_id = ? AND kind = 'TEST'", String.class, campaignId);
+		assertThat(status).isEqualTo("SENT");
 	}
 
 	private OffsetDateTime sentAtOf(long customerId) {

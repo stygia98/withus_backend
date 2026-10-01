@@ -1,5 +1,6 @@
 package com.withus.campaign.mapper;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 
 import org.apache.ibatis.annotations.Mapper;
@@ -52,4 +53,7 @@ public interface SendLogMapper {
 
 	/** 재확인 보류(캠페인 PAUSED): next_attempt_at 은 바꾸지 않고 PENDING 으로 되돌린다(발송 큐 Plan 8장) */
 	void revertToPending(@Param("sendLogId") long sendLogId);
+
+	/** 발송 시간창(08:00~20:50) 밖 보류: attempt_count 는 올리지 않고 next_attempt_at 만 설정한다(발송 큐 Plan 8장) */
+	void holdForSendWindow(@Param("sendLogId") long sendLogId, @Param("nextAttemptAt") OffsetDateTime nextAttemptAt);
 }
