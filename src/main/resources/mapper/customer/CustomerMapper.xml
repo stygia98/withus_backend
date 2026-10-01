@@ -120,6 +120,30 @@
 		)
 	</select>
 
+	<!-- 휴면 판정 (PRD F-11): 최근 180일 클릭(봇 제외)·구매가 하나라도 있으면 활동.
+	     클릭은 CAMPAIGN 발송만 센다 (CLAUDE.md 6장 8번: TEST·NOTICE 는 모든 지표에서 제외). 오픈은 보지 않는다 -->
+	<sql id="activeIn180Days">
+		(EXISTS (SELECT 1 FROM purchase p
+		         WHERE p.customer_id = c.customer_id AND p.purchased_at >= now() - INTERVAL '180 days')
+		 OR EXISTS (SELECT 1 FROM send_log s JOIN track_event e ON e.send_log_id = s.send_log_id
+		            WHERE s.customer_id = c.customer_id AND s.kind = 'CAMPAIGN'
+		              AND e.event_type = 'CLICK' AND e.bot_yn = 'N' AND e.occurred_at >= now() - INTERVAL '180 days'))
+	</sql>
+
+	<!-- 가입 후 180일이 지난 고객만 판정한다 -->
+	<update id="markDormant">
+		UPDATE customer c SET dormant_yn = 'Y', dormant_at = now(), updated_at = now()
+		WHERE c.deleted_yn = 'N' AND c.dormant_yn = 'N' AND c.joined_at &lt;= CURRENT_DATE - 180
+		  AND NOT <include refid="activeIn180Days"/>
+	</update>
+
+	<!-- 활동이 생겼거나, 가입일 수정으로 판정 대상에서 빠진 휴면 고객 -->
+	<update id="releaseDormant">
+		UPDATE customer c SET dormant_yn = 'N', dormant_at = NULL, updated_at = now()
+		WHERE c.deleted_yn = 'N' AND c.dormant_yn = 'Y'
+		  AND (c.joined_at &gt; CURRENT_DATE - 180 OR <include refid="activeIn180Days"/>)
+	</update>
+
 	<select id="findConsentHistory" resultType="com.withus.customer.domain.ConsentHistory">
 		SELECT history_id, channel, before_yn, after_yn, source, note, changed_at
 		FROM consent_history WHERE customer_id = #{customerId}
