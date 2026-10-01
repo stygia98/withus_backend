@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.withus.coupon.mapper.CouponMapper">
+
+	<!-- 발급·사용 수는 목록 화면용 (API_SPEC 7장). 사용 수 = used_at 이 있는 발급 건 -->
+	<sql id="couponColumns">
+		c.coupon_id, c.name, c.discount_type, c.discount_value, c.max_discount_amount, c.valid_from, c.valid_to,
+		c.created_at, c.updated_at,
+		(SELECT count(*) FROM coupon_issue i WHERE i.coupon_id = c.coupon_id) AS issued_count,
+		(SELECT count(*) FROM coupon_issue i WHERE i.coupon_id = c.coupon_id AND i.used_at IS NOT NULL) AS used_count
+	</sql>
+
+	<select id="findList" resultType="com.withus.coupon.domain.Coupon">
+		SELECT <include refid="couponColumns"/> FROM coupon c
+		ORDER BY c.coupon_id DESC
+		LIMIT #{limit} OFFSET #{offset}
+	</select>
+
+	<select id="count" resultType="long">
+		SELECT count(*) FROM coupon
+	</select>
+
+	<select id="findById" resultType="com.withus.coupon.domain.Coupon" flushCache="true">
+		SELECT <include refid="couponColumns"/> FROM coupon c WHERE c.coupon_id = #{couponId}
+	</select>
+
+	<!-- 발급 INSERT 의 FK 검사(KEY SHARE)와 충돌하므로, 잠근 동안에는 새 발급이 기다린다 -->
+	<select id="lockById" resultType="long" flushCache="true">
+		SELECT coupon_id FROM coupon WHERE coupon_id = #{couponId} FOR UPDATE
+	</select>
+
+	<select id="countIssues" resultType="long" flushCache="true">
+		SELECT count(*) FROM coupon_issue WHERE coupon_id = #{couponId}
+	</select>
+
+	<select id="insert" resultType="long" flushCache="true">
+		INSERT INTO coupon (name, discount_type, discount_value, max_discount_amount, valid_from, valid_to)
+		VALUES (#{d.name}, #{d.discountType}, #{d.discountValue}, #{d.maxDiscountAmount}, #{d.validFrom}, #{d.validTo})
+		RETURNING coupon_id
+	</select>
+
+	<update id="update">
+		UPDATE coupon
+		SET name = #{d.name}, discount_type = #{d.discountType}, discount_value = #{d.discountValue},
+		    max_discount_amount = #{d.maxDiscountAmount}, valid_from = #{d.validFrom}, valid_to = #{d.validTo},
+		    updated_at = now()
+		WHERE coupon_id = #{couponId}
+	</update>
+
+	<!-- 동시 재시도에서도 제약 위반 없이 1건만 남는다. 기존 건이 있으면 그 토큰을 다시 조회해 쓴다 -->
+	<insert id="insertIssueIfAbsent">
+		INSERT INTO coupon_issue (coupon_id, customer_id, send_log_id)
+		VALUES (#{couponId}, #{customerId}, #{sendLogId})
+		ON CONFLICT (send_log_id) DO NOTHING
+	</insert>
+
+	<select id="findTokenBySendLog" resultType="string" flushCache="true">
+		SELECT CAST(token AS text) FROM coupon_issue WHERE send_log_id = #{sendLogId}
+	</select>
+
+	<!-- 조건을 UPDATE 한 문장에 넣어 두 번 눌러도 한 번만 성공한다 (조회 후 갱신하면 경합에서 둘 다 통과) -->
+	<sql id="usableCondition">
+		i.used_at IS NULL
+		AND c.coupon_id = i.coupon_id
+		AND #{today} BETWEEN c.valid_from AND c.valid_to
+	</sql>
+
+	<update id="markUsedById">
+		UPDATE coupon_issue i SET used_at = now(), updated_at = now()
+		FROM coupon c
+		WHERE i.issue_id = #{issueId} AND <include refid="usableCondition"/>
+	</update>
+
+	<update id="markUsedByToken">
+		UPDATE coupon_issue i SET used_at = now(), updated_at = now()
+		FROM coupon c
+		WHERE i.token = CAST(#{token} AS uuid) AND <include refid="usableCondition"/>
+	</update>
+
+	<sql id="issueColumns">
+		i.issue_id, i.coupon_id, i.customer_id, cu.name AS customer_name, i.send_log_id, i.issued_at, i.used_at,
+		c.name AS coupon_name, c.discount_type, c.discount_value, c.max_discount_amount, c.valid_from, c.valid_to
+	</sql>
+
+	<sql id="issueFrom">
+		FROM coupon_issue i
+		JOIN coupon c   ON c.coupon_id = i.coupon_id
+		JOIN customer cu ON cu.customer_id = i.customer_id
+	</sql>
+
+	<select id="findIssueById" resultType="com.withus.coupon.domain.CouponIssueRow" flushCache="true">
+		SELECT <include refid="issueColumns"/> <include refid="issueFrom"/>
+		WHERE i.issue_id = #{issueId}
+	</select>
+
+	<select id="findIssueByToken" resultType="com.withus.coupon.domain.CouponIssueRow" flushCache="true">
+		SELECT <include refid="issueColumns"/> <include refid="issueFrom"/>
+		WHERE i.token = CAST(#{token} AS uuid)
+	</select>
+
+	<select id="findIssuesByCoupon" resultType="com.withus.coupon.domain.CouponIssueRow">
+		SELECT <include refid="issueColumns"/> <include refid="issueFrom"/>
+		WHERE i.coupon_id = #{couponId}
+		ORDER BY i.issue_id DESC
+		LIMIT #{limit} OFFSET #{offset}
+	</select>
+
+	<select id="countIssuesByCoupon" resultType="long">
+		SELECT count(*) FROM coupon_issue WHERE coupon_id = #{couponId}
+	</select>
+
+	<select id="findIssuesByCustomer" resultType="com.withus.coupon.domain.CouponIssueRow">
+		SELECT <include refid="issueColumns"/> <include refid="issueFrom"/>
+		WHERE i.customer_id = #{customerId}
+		<if test="usableOn != null">
+		  AND i.used_at IS NULL
+		  AND #{usableOn} BETWEEN c.valid_from AND c.valid_to
+		</if>
+		ORDER BY i.issue_id DESC
+	</select>
+</mapper>
