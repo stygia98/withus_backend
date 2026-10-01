@@ -6,6 +6,7 @@ import java.util.List;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
+import com.withus.campaign.domain.CustomerPlaceholderSource;
 import com.withus.campaign.domain.CustomerRecipient;
 import com.withus.campaign.domain.SendLog;
 import com.withus.common.domain.Channel;
@@ -66,4 +67,19 @@ public interface SendLogMapper {
 	 * @return 복구된 건수
 	 */
 	int recoverStuckSending();
+
+	/** 렌더링용 치환 값 원본(customer SELECT) — MessageComposer 가 PlaceholderRenderer 에 넘길 Map 을 만든다 */
+	CustomerPlaceholderSource findPlaceholderSource(@Param("customerId") long customerId);
+
+	/** 일회성 캠페인에 연결된 쿠폰 ID (없으면 null) */
+	Long findCouponIdByCampaignId(@Param("campaignId") long campaignId);
+
+	/** 워크플로우 SEND 노드에 연결된 쿠폰 ID — config_json.couponId (없으면 null) */
+	Long findCouponIdByStepId(@Param("stepId") long stepId);
+
+	/** 오늘(Asia/Seoul)이 쿠폰 유효기간(valid_from~valid_to) 안인가 */
+	boolean isCouponValid(@Param("couponId") long couponId);
+
+	/** 재확인 이후 렌더링 단계에서 탈락(쿠폰 유효기간 밖): 종단 SKIPPED(COUPON_INVALID), 재시도하지 않는다 */
+	void recordSkippedCoupon(@Param("sendLogId") long sendLogId);
 }
