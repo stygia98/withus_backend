@@ -40,4 +40,16 @@ public interface CampaignMapper {
 
 	/** DRAFT·SCHEDULED → ACTIVE, started_at 설정(낙관적 검사). @return 바뀐 행 수 */
 	int start(long campaignId);
+
+	/** 예약 시각이 지난 SCHEDULED 캠페인 ID 목록(캠페인 4/4) */
+	List<Long> findDueScheduled();
+
+	/**
+	 * 자동 완료 대상: 일회성이고 ACTIVE 로 시작까지 마쳤는데(started_at 있음) PENDING·SENDING 이 하나도 없는 캠페인.
+	 * started_at 조건으로 시작 직후(큐 적재 전) 찰나에 집히는 걸 막는다(캠페인 4/4)
+	 */
+	List<Long> findCompletable();
+
+	/** ACTIVE → COMPLETED, ended_at 설정(낙관적 검사). @return 바뀐 행 수 */
+	int complete(long campaignId);
 }
