@@ -90,6 +90,13 @@ class AiCopyDraftApiTest {
 	}
 
 	@Test
+	void AI02_발송_시간_추천은_STAFF가_쓸_수_없다() throws Exception {
+		// API_SPEC 11장 권한: O M
+		mvc.perform(get("/api/v1/ai/send-time-recommendations").param("targetCount", "100").cookie(access))
+			.andExpect(status().isForbidden());
+	}
+
+	@Test
 	void 로그인하지_않으면_401() throws Exception {
 		mvc.perform(post("/api/v1/ai/copy-drafts").cookie(xsrf).header("X-XSRF-TOKEN", xsrf.getValue())
 				.contentType(MediaType.APPLICATION_JSON).content("{}"))

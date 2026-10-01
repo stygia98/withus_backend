@@ -1,14 +1,18 @@
 package com.withus.ai.controller;
 
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.withus.ai.dto.CopyDraftRequest;
 import com.withus.ai.dto.CopyDraftResponse;
+import com.withus.ai.dto.SendTimeRecommendationResponse;
 import com.withus.ai.service.CopyDraftService;
+import com.withus.ai.service.SendTimeRecommendationService;
 import com.withus.common.response.ApiResponse;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -21,9 +25,12 @@ import jakarta.validation.Valid;
 public class AiController {
 
 	private final CopyDraftService copyDraftService;
+	private final SendTimeRecommendationService sendTimeRecommendationService;
 
-	public AiController(CopyDraftService copyDraftService) {
+	public AiController(CopyDraftService copyDraftService,
+		SendTimeRecommendationService sendTimeRecommendationService) {
 		this.copyDraftService = copyDraftService;
+		this.sendTimeRecommendationService = sendTimeRecommendationService;
 	}
 
 	@Operation(summary = "AI-01 메일 문구 초안 3안",
@@ -33,5 +40,20 @@ public class AiController {
 	@PostMapping("/copy-drafts")
 	public ApiResponse<CopyDraftResponse> copyDrafts(@Valid @RequestBody CopyDraftRequest request) {
 		return ApiResponse.ok(copyDraftService.generate(request));
+	}
+
+	/**
+	 * adYn 은 API 계약상 받지만 판정에는 쓰지 않는다 — 20:50 종료 가드레일을 광고 여부와 관계없이 항상 적용하기로 했다
+	 * (2026-10-01 결정, PRD 5.3 "항상 적용").
+	 */
+	@Operation(summary = "AI-02 최적 발송 시간 추천",
+		description = "최근 90일 사람 오픈·클릭(클릭 2 : 오픈 1)으로 요일·시간대 상위 3개. 시작 08:00~20:00, "
+			+ "시작 + (PENDING + targetCount) ÷ 초당 한도 ≤ 20:50 인 후보만. 이벤트 100건 미만이면 dataSufficient=false, "
+			+ "WEEKDAY 10:00 1건. 근거 문장은 Gemini 가 쓰고, 실패하면 서버 문장으로 대신한다.")
+	@PreAuthorize("hasAnyRole('OWNER','MANAGER')")
+	@GetMapping("/send-time-recommendations")
+	public ApiResponse<SendTimeRecommendationResponse> sendTimeRecommendations(@RequestParam long targetCount,
+		@RequestParam(required = false) String adYn) {
+		return ApiResponse.ok(sendTimeRecommendationService.recommend(targetCount));
 	}
 }
