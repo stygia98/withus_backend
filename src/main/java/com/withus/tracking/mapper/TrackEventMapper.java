@@ -28,6 +28,9 @@ public interface TrackEventMapper {
 	/** since 이후 이 발송 건의 이벤트를 봇으로 바꾼다. 바뀐 건수를 돌려준다 */
 	int markBotSince(@Param("sendLogId") long sendLogId, @Param("since") OffsetDateTime since);
 
-	/** 봇이 아닌 이벤트 존재 여부. TEST·NOTICE 발송은 제외한다 */
+	/** 봇이 아닌 이벤트 존재 여부 (발송 종류 무관). 클릭 시 OPEN 보정 판단에만 쓴다 */
+	boolean existsNotBotEvent(@Param("sendLogId") long sendLogId, @Param("eventType") String eventType);
+
+	/** 봇이 아닌 이벤트 존재 여부. TEST·NOTICE 발송은 제외한다 (외부 공개용) */
 	boolean existsHumanEvent(@Param("sendLogId") long sendLogId, @Param("eventType") String eventType);
 }

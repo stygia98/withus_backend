@@ -39,6 +39,13 @@
 		  AND bot_yn = 'N'
 	</update>
 
+	<select id="existsNotBotEvent" resultType="boolean">
+		SELECT EXISTS (
+			SELECT 1 FROM track_event
+			WHERE send_log_id = #{sendLogId} AND event_type = #{eventType} AND bot_yn = 'N'
+		)
+	</select>
+
 	<select id="existsHumanEvent" resultType="boolean">
 		SELECT EXISTS (
 			SELECT 1
