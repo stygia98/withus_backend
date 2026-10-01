@@ -5,10 +5,15 @@ import java.util.List;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
+import com.withus.campaign.domain.CustomerRecipient;
 import com.withus.campaign.domain.SendLog;
+import com.withus.common.domain.Channel;
 
 @Mapper
 public interface SendLogMapper {
+
+	/** 적재 시점 수신처 조회(customer 테이블 SELECT, 삭제된 고객 제외). channel 에 따라 email 또는 phone */
+	List<CustomerRecipient> findRecipients(@Param("customerIds") List<Long> customerIds, @Param("channel") Channel channel);
 
 	/**
 	 * 일회성·A/B 캠페인용 배치 적재. instanceId 는 전부 null 이어야 한다.

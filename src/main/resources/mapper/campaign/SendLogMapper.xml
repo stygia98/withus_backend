@@ -2,6 +2,18 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.withus.campaign.mapper.SendLogMapper">
 
+	<select id="findRecipients" resultType="com.withus.campaign.domain.CustomerRecipient">
+		SELECT customer_id,
+			<choose>
+				<when test="channel == @com.withus.common.domain.Channel@EMAIL">email</when>
+				<otherwise>phone</otherwise>
+			</choose> AS recipient
+		FROM customer
+		WHERE deleted_yn = 'N'
+		AND customer_id IN
+		<foreach collection="customerIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+	</select>
+
 	<insert id="insertOneTimeBatch">
 		INSERT INTO send_log (campaign_id, instance_id, step_id, customer_id, recipient, channel, status, kind, priority)
 		VALUES
