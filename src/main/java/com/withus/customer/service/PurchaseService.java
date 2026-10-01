@@ -37,7 +37,12 @@ public class PurchaseService {
 	@Transactional
 	public PurchaseResponse create(long customerId, PurchaseCreateRequest request, long memberId) {
 		requireActive(customerId);
-		OffsetDateTime purchasedAt = request.purchasedAt() != null ? request.purchasedAt() : OffsetDateTime.now(SEOUL);
+		OffsetDateTime now = OffsetDateTime.now(SEOUL);
+		OffsetDateTime purchasedAt = request.purchasedAt() != null ? request.purchasedAt() : now;
+		if (purchasedAt.isAfter(now)) {
+			// 미래 날짜로 시작 전 쿠폰을 쓰거나 휴면 판정이 틀어지지 않게 막는다 (PR #14 리뷰)
+			throw new BusinessException(CommonErrorCode.COMMON_INVALID_INPUT, "구매일시는 미래일 수 없습니다.", null);
+		}
 		Long couponIssueId = request.couponIssueId();
 		if (couponIssueId != null) {
 			String state = purchaseMapper.findCouponIssueState(couponIssueId, customerId,

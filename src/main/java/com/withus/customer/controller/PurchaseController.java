@@ -38,7 +38,8 @@ public class PurchaseController {
 	}
 
 	@Operation(summary = "구매 등록", description = "누적구매액에 더한다. couponIssueId 를 주면 사용 처리한다 — "
-		+ "이 고객 발급 건이 아니거나 구매일이 유효기간 밖이면 COUPON_NOT_USABLE(422), 이미 사용됐으면 COUPON_ALREADY_USED(409)")
+		+ "이 고객 발급 건이 아니거나 구매일이 유효기간 밖이면 COUPON_NOT_USABLE(422), 이미 사용됐으면 COUPON_ALREADY_USED(409). "
+		+ "purchasedAt 이 미래면 COMMON_INVALID_INPUT(400)")
 	@PostMapping
 	public ApiResponse<PurchaseResponse> create(@PathVariable long customerId,
 		@Valid @RequestBody PurchaseCreateRequest request, @AuthenticationPrincipal AuthMember me) {

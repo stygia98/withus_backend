@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -71,25 +72,37 @@ class PurchaseApiTest {
 
 	@Test
 	void 쿠폰은_이_고객_발급분_미사용_구매일이_유효기간_안일_때만_쓸_수_있다() throws Exception {
-		long coupon = coupon("2026-10-01", "2026-10-31");
+		long coupon = coupon("2026-09-01", "2026-09-30");
 		long usable = issue(coupon, customerId, false);
 		long others = issue(coupon, customer(), false);
 		long used = issue(coupon, customerId, true);
 
-		purchase(customerId, body(others, "2026-10-02")).andExpect(status().isUnprocessableContent())
+		purchase(customerId, body(others, "2026-09-15")).andExpect(status().isUnprocessableContent())
 			.andExpect(jsonPath("$.error.code").value("COUPON_NOT_USABLE"));
-		purchase(customerId, body(usable, "2026-11-01")).andExpect(status().isUnprocessableContent())
+		purchase(customerId, body(usable, "2026-08-31")).andExpect(status().isUnprocessableContent())
 			.andExpect(jsonPath("$.error.code").value("COUPON_NOT_USABLE"));
-		purchase(customerId, body(used, "2026-10-02")).andExpect(status().isConflict())
+		purchase(customerId, body(used, "2026-09-15")).andExpect(status().isConflict())
 			.andExpect(jsonPath("$.error.code").value("COUPON_ALREADY_USED"));
-		purchase(customerId, body(Long.MAX_VALUE, "2026-10-02")).andExpect(status().isUnprocessableContent());
+		purchase(customerId, body(Long.MAX_VALUE, "2026-09-15")).andExpect(status().isUnprocessableContent());
 
-		purchase(customerId, body(usable, "2026-10-31")).andExpect(status().isOk())
+		purchase(customerId, body(usable, "2026-09-30")).andExpect(status().isOk())
 			.andExpect(jsonPath("$.data.couponIssueId").value(usable))
 			.andExpect(jsonPath("$.data.couponName").value("10월 쿠폰"));
 		// 같은 발급 건으로 두 번째 구매는 uq_purchase_coupon_issue 로 막힌다 (트랜잭션이 깨지므로 마지막에 확인)
-		purchase(customerId, body(usable, "2026-10-31")).andExpect(status().isConflict())
+		purchase(customerId, body(usable, "2026-09-30")).andExpect(status().isConflict())
 			.andExpect(jsonPath("$.error.code").value("COUPON_ALREADY_USED"));
+	}
+
+	@Test
+	void 미래_구매일시는_400_이고_저장하지_않는다() throws Exception {
+		String future = OffsetDateTime.now().plusMinutes(5).toString();
+		purchase(customerId, "{\"amount\":1000,\"purchasedAt\":\"" + future + "\"}").andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.error.code").value("COMMON_INVALID_INPUT"));
+
+		assertThat(jdbc.queryForObject("SELECT count(*) FROM purchase WHERE customer_id = ?", Long.class, customerId))
+			.isZero();
+		assertThat(jdbc.queryForObject("SELECT total_purchase FROM customer WHERE customer_id = ?", Long.class,
+			customerId)).isZero();
 	}
 
 	@Test
