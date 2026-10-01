@@ -50,6 +50,15 @@ public interface CustomerMapper {
 	/** 최신순 */
 	List<ConsentHistory> findConsentHistory(long customerId);
 
-	/** 삭제되지 않았고, 채널 동의 Y 이고, 그 채널 값이 suppression 에 없으면 true. 쿼리 1회 */
+	/**
+	 * 삭제되지 않았고, 채널 동의 Y 이고, 그 채널 값이 suppression 에 없으면 true. 쿼리 1회
+	 * SMS 는 휴대폰이 비어 있으면 false (보낼 수 없는 고객 → 발송 큐에서 SKIPPED, PL 결정 #5)
+	 */
 	boolean isSendable(@Param("customerId") long customerId, @Param("channel") Channel channel);
+
+	/** 휴면 조건에 맞는 고객을 휴면으로. 바뀐 건수 */
+	int markDormant();
+
+	/** 휴면 조건에서 벗어난 고객의 휴면 해제. 바뀐 건수 */
+	int releaseDormant();
 }

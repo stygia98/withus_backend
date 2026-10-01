@@ -48,6 +48,14 @@ class ConsentServiceTest {
 	}
 
 	@Test
+	void SMS_동의여도_휴대폰이_없으면_불가() {
+		long id = customer("Y", "Y", "N", "N");
+		jdbc.update("UPDATE customer SET phone = NULL WHERE customer_id = ?", id);
+		assertThat(consentService.isSendable(id, Channel.SMS)).isFalse();
+		assertThat(consentService.isSendable(id, Channel.EMAIL)).isTrue();
+	}
+
+	@Test
 	void 삭제된_고객과_없는_고객은_불가() {
 		long id = customer("Y", "Y", "N", "Y");
 		assertThat(consentService.isSendable(id, Channel.EMAIL)).isFalse();

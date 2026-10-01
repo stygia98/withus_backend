@@ -17,7 +17,7 @@ public class ConsentServiceImpl implements ConsentService {
 
 	private final CustomerMapper customerMapper;
 
-	/** 없는 고객도 false. 대량 호출되므로 고객당 쿼리 1회 */
+	/** 없는 고객, 휴대폰 없는 고객의 SMS 도 false. 대량 호출되므로 고객당 쿼리 1회 */
 	@Override
 	@Transactional(readOnly = true)
 	public boolean isSendable(long customerId, Channel channel) {

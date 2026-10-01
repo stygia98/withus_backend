@@ -18,5 +18,7 @@ withus:
     local-path: ./uploads
   sms:
     type: mock
+  ai:
+    type: ${WITHUS_AI_TYPE:mock}
   cookie:
     secure: false   # 로컬 http

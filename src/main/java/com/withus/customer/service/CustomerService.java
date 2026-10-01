@@ -3,6 +3,7 @@ package com.withus.customer.service;
 import java.util.List;
 import java.util.Locale;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -12,8 +13,10 @@ import com.withus.common.exception.BusinessException;
 import com.withus.common.exception.CommonErrorCode;
 import com.withus.common.response.PageResponse;
 import com.withus.customer.domain.Customer;
+import com.withus.customer.domain.CustomerDeletedEvent;
 import com.withus.customer.domain.CustomerErrorCode;
 import com.withus.customer.domain.CustomerFields;
+import com.withus.customer.domain.CustomerRegisteredEvent;
 import com.withus.customer.domain.CustomerSearch;
 import com.withus.customer.domain.CustomerSort;
 import com.withus.customer.dto.ConsentHistoryResponse;
@@ -34,6 +37,7 @@ public class CustomerService {
 	private static final int MAX_PAGE_SIZE = 100;
 
 	private final CustomerMapper customerMapper;
+	private final ApplicationEventPublisher events;
 
 	/**
 	 * 개별 등록. suppression 에 있는 채널은 요청과 관계없이 동의 N (F-01 규칙을 개별 등록에도 적용)
@@ -64,7 +68,7 @@ public class CustomerService {
 		if ("Y".equals(smsYn)) {
 			customerMapper.insertConsentHistory(id, Channel.SMS, null, "Y", "ADMIN", null);
 		}
-		// TODO(팀원2 연동, PL 확인): CUSTOMER_REGISTERED 워크플로우 트리거 (API_SPEC 3장, PRD 6장)
+		events.publishEvent(new CustomerRegisteredEvent(id)); // 워크플로우 트리거 판정은 팀원2 (PRD 6.2)
 		return CustomerResponse.of(customerMapper.findActiveById(id), suppressed);
 	}
 
@@ -96,7 +100,7 @@ public class CustomerService {
 		if (customerMapper.softDelete(customerId) == 0) {
 			throw new BusinessException(CommonErrorCode.COMMON_NOT_FOUND);
 		}
-		// TODO(팀원2 연동, PL 확인): 진행 중 워크플로우 인스턴스 CANCELLED (API_SPEC 3장)
+		events.publishEvent(new CustomerDeletedEvent(customerId)); // 진행 중 인스턴스 CANCELLED 는 팀원2
 	}
 
 	/**

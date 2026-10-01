@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.withus.customer.mapper.PurchaseMapper">
+
+	<select id="findCouponIssueState" resultType="string">
+		SELECT CASE WHEN i.used_at IS NOT NULL THEN 'USED'
+		            WHEN #{on}::date BETWEEN c.valid_from AND c.valid_to THEN 'USABLE'
+		            ELSE 'OUT_OF_PERIOD' END
+		FROM coupon_issue i JOIN coupon c ON c.coupon_id = i.coupon_id
+		WHERE i.issue_id = #{couponIssueId} AND i.customer_id = #{customerId}
+	</select>
+
+	<!-- RETURNING 으로 키를 받으려고 select 로 둔다. 쓰기라서 캐시를 비운다 -->
+	<select id="insert" resultType="long" flushCache="true">
+		INSERT INTO purchase (customer_id, amount, coupon_issue_id, created_by, purchased_at)
+		VALUES (#{customerId}, #{amount}, #{couponIssueId}, #{createdBy}, #{purchasedAt})
+		RETURNING purchase_id
+	</select>
+
+	<update id="addTotalPurchase">
+		UPDATE customer SET total_purchase = total_purchase + #{amount}, updated_at = now()
+		WHERE customer_id = #{customerId} AND deleted_yn = 'N'
+	</update>
+
+	<sql id="selectPurchase">
+		SELECT p.purchase_id, p.amount, p.coupon_issue_id, c.name AS coupon_name, p.purchased_at
+		FROM purchase p
+		LEFT JOIN coupon_issue i ON i.issue_id = p.coupon_issue_id
+		LEFT JOIN coupon c ON c.coupon_id = i.coupon_id
+	</sql>
+
+	<select id="findById" resultType="com.withus.customer.domain.Purchase">
+		<include refid="selectPurchase"/> WHERE p.purchase_id = #{purchaseId}
+	</select>
+
+	<select id="findByCustomer" resultType="com.withus.customer.domain.Purchase">
+		<include refid="selectPurchase"/> WHERE p.customer_id = #{customerId}
+		ORDER BY p.purchased_at DESC, p.purchase_id DESC
+	</select>
+</mapper>
