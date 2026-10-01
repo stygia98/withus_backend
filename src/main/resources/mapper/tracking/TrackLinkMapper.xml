@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.withus.tracking.mapper.TrackLinkMapper">
+
+	<!-- 워크플로우 SEND 노드는 config_json.templateId, 일회성은 campaign.template_id (DB_SCHEMA 5.2). 숫자가 아니면 무시 -->
+	<select id="findTarget" resultType="com.withus.tracking.domain.TrackingTarget">
+		SELECT s.tracking_token::text AS tracking_token,
+		       t.template_id,
+		       t.updated_at          AS template_updated_at
+		FROM send_log s
+		LEFT JOIN campaign c       ON c.campaign_id = s.campaign_id
+		LEFT JOIN workflow_step ws ON ws.step_id = s.step_id
+		LEFT JOIN template t       ON t.template_id = COALESCE(
+			CASE WHEN ws.config_json ->> 'templateId' ~ '^[0-9]{1,18}$'
+			     THEN (ws.config_json ->> 'templateId')::bigint END,
+			c.template_id)
+		WHERE s.send_log_id = #{sendLogId}
+	</select>
+
+	<select id="findTemplateBody" resultType="string">
+		SELECT body FROM template WHERE template_id = #{templateId}
+	</select>
+
+	<select id="findLinks" resultType="com.withus.tracking.domain.TrackLink">
+		SELECT link_id, original_url
+		FROM track_link
+		WHERE template_id = #{templateId}
+		ORDER BY link_order, link_id
+	</select>
+
+	<insert id="insertIfAbsent">
+		INSERT INTO track_link (template_id, original_url, link_order)
+		VALUES (#{templateId}, #{originalUrl}, #{linkOrder})
+		ON CONFLICT (template_id, md5(original_url)) DO NOTHING
+	</insert>
+</mapper>
