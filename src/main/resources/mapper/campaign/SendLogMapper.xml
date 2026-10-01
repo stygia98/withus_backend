@@ -33,4 +33,35 @@
 		</foreach>
 		ON CONFLICT ON CONSTRAINT uq_send_log_step DO NOTHING
 	</insert>
+
+	<!-- UPDATE ... RETURNING 은 select 로 선언해야 ResultSet 을 받는다 (MyBatis+PostgreSQL 관용 패턴) -->
+	<select id="claimBatch" resultType="com.withus.campaign.domain.SendLog">
+		UPDATE send_log SET status = 'SENDING', updated_at = now()
+		WHERE send_log_id IN (
+			SELECT send_log_id FROM send_log
+			WHERE status = 'PENDING' AND (next_attempt_at IS NULL OR next_attempt_at &lt;= now())
+			  AND NOT EXISTS (
+			      SELECT 1 FROM campaign c
+			      WHERE c.campaign_id = send_log.campaign_id AND c.status = 'PAUSED'
+			  )
+			ORDER BY priority, send_log_id
+			LIMIT 50
+			FOR UPDATE SKIP LOCKED
+		)
+		RETURNING *
+	</select>
+
+	<update id="recordSent">
+		UPDATE send_log SET status = 'SENT', sent_at = now(), provider_message_id = #{providerMessageId}
+		WHERE send_log_id = #{sendLogId}
+	</update>
+
+	<update id="recordFailed">
+		UPDATE send_log SET status = 'FAILED', error_message = #{errorMessage}
+		WHERE send_log_id = #{sendLogId}
+	</update>
+
+	<select id="findByProviderMessageId" resultType="com.withus.campaign.domain.SendLog">
+		SELECT * FROM send_log WHERE provider_message_id = #{providerMessageId}
+	</select>
 </mapper>

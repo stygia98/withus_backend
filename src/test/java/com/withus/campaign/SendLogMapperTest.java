@@ -162,4 +162,85 @@ class SendLogMapperTest {
 
 		assertThat(inserted).isEqualTo(2);
 	}
+
+	@Test
+	void 선점은_우선순위가_높은_것부터_가져온다() {
+		long segmentId = newSegment();
+		long campaignId = newOneTimeCampaign(segmentId);
+		long otherCustomerId = newCustomer();
+		SendLog bulk = oneTimeLog(campaignId, customerId); // priority 3
+		SendLog test = SendLog.builder()
+			.campaignId(campaignId)
+			.customerId(otherCustomerId)
+			.recipient("customer@withus.local")
+			.channel(Channel.EMAIL)
+			.status(SendStatus.PENDING)
+			.kind(SendKind.TEST)
+			.priority(SendLog.PRIORITY_TEST) // priority 1
+			.build();
+		sendLogMapper.insertOneTimeBatch(List.of(bulk, test));
+
+		List<SendLog> claimed = sendLogMapper.claimBatch();
+
+		assertThat(claimed).extracting(SendLog::getCustomerId)
+			.as("priority 1(TEST)이 priority 3(CAMPAIGN)보다 먼저 와야 한다")
+			.containsExactly(otherCustomerId, customerId);
+		assertThat(claimed).allSatisfy(log -> assertThat(log.getStatus()).isEqualTo(SendStatus.SENDING));
+	}
+
+	@Test
+	void PAUSED_캠페인_건은_선점_대상에서_제외된다() {
+		long segmentId = newSegment();
+		long pausedCampaignId = newOneTimeCampaign(segmentId);
+		jdbcTemplate.update("UPDATE campaign SET status = 'PAUSED' WHERE campaign_id = ?", pausedCampaignId);
+		sendLogMapper.insertOneTimeBatch(List.of(oneTimeLog(pausedCampaignId, customerId)));
+
+		long activeCampaignId = newOneTimeCampaign(segmentId);
+		long otherCustomerId = newCustomer();
+		sendLogMapper.insertOneTimeBatch(List.of(oneTimeLog(activeCampaignId, otherCustomerId)));
+
+		List<SendLog> claimed = sendLogMapper.claimBatch();
+
+		assertThat(claimed).extracting(SendLog::getCampaignId).containsOnly(activeCampaignId);
+		String pausedStatus = jdbcTemplate.queryForObject(
+			"SELECT status FROM send_log WHERE campaign_id = ?", String.class, pausedCampaignId);
+		assertThat(pausedStatus).isEqualTo("PENDING");
+	}
+
+	@Test
+	void 발송_성공을_기록하면_provider_message_id로_조회된다() {
+		long segmentId = newSegment();
+		long campaignId = newOneTimeCampaign(segmentId);
+		sendLogMapper.insertOneTimeBatch(List.of(oneTimeLog(campaignId, customerId)));
+		long sendLogId = jdbcTemplate.queryForObject(
+			"SELECT send_log_id FROM send_log WHERE campaign_id = ? AND customer_id = ?",
+			Long.class, campaignId, customerId);
+
+		sendLogMapper.recordSent(sendLogId, "ses-message-id-1");
+
+		SendLog found = sendLogMapper.findByProviderMessageId("ses-message-id-1");
+		assertThat(found.getSendLogId()).isEqualTo(sendLogId);
+		assertThat(found.getStatus()).isEqualTo(SendStatus.SENT);
+		assertThat(found.getSentAt()).isNotNull();
+		assertThat(found.getCustomerId()).isEqualTo(customerId);
+	}
+
+	@Test
+	void 발송_실패를_기록하면_오류_메시지가_남는다() {
+		long segmentId = newSegment();
+		long campaignId = newOneTimeCampaign(segmentId);
+		sendLogMapper.insertOneTimeBatch(List.of(oneTimeLog(campaignId, customerId)));
+		long sendLogId = jdbcTemplate.queryForObject(
+			"SELECT send_log_id FROM send_log WHERE campaign_id = ? AND customer_id = ?",
+			Long.class, campaignId, customerId);
+
+		sendLogMapper.recordFailed(sendLogId, "PERMANENT");
+
+		String status = jdbcTemplate.queryForObject(
+			"SELECT status FROM send_log WHERE send_log_id = ?", String.class, sendLogId);
+		String errorMessage = jdbcTemplate.queryForObject(
+			"SELECT error_message FROM send_log WHERE send_log_id = ?", String.class, sendLogId);
+		assertThat(status).isEqualTo("FAILED");
+		assertThat(errorMessage).isEqualTo("PERMANENT");
+	}
 }
