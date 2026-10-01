@@ -20,5 +20,8 @@ withus:
     type: mock
   ai:
     type: ${WITHUS_AI_TYPE:mock}
+  unsubscribe:
+    # .env 에 HMAC_SECRET 이 없어도 로컬 기동·테스트가 되도록 둔 개발 전용 값 (비밀 아님, 운영은 환경변수 필수)
+    hmac-secret: ${HMAC_SECRET:local-dev-only-unsubscribe-hmac-key-0000}
   cookie:
     secure: false   # 로컬 http
