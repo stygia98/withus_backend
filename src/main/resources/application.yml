@@ -33,6 +33,7 @@ mybatis:
 
 ses:
   max-send-rate: 1
+  topic-arn: ${SES_TOPIC_ARN:}   # 반송·스팸신고 SNS 토픽. 비어 있으면 웹훅은 모든 요청을 무시한다 (W5 배포 시 설정)
 
 withus:
   sender:
@@ -44,9 +45,21 @@ withus:
     base-url: ${WITHUS_PUBLIC_BASE_URL:http://localhost:8080}   # 메일 링크 기준 주소. 운영: Amplify 주소
     bot-click-seconds: 10
     bot-user-agent-keywords: bot,crawler,spider,scanner,preview
+    burst-click-window-seconds: 1
+    ip-salt: ${TRACKING_IP_SALT:}   # IP 해시 솔트. 비밀값이므로 환경변수로만 주입
+  ai:
+    type: gemini            # gemini | mock. local 프로필은 mock 이 기본 (WITHUS_AI_TYPE=gemini 로 실제 호출)
+    gemini:
+      api-key: ${GEMINI_API_KEY:}   # 비밀값이므로 환경변수로만 주입
+      model: gemini-3.1-flash-lite   # 무료 등급 가장 가벼운 텍스트 모델 (TECH_STACK 5장)
+      base-url: https://generativelanguage.googleapis.com/v1beta
+      connect-timeout: 3s
+      read-timeout: 30s
   send-window:
     start: "08:00"
     end: "20:50"
+  unsubscribe:
+    hmac-secret: ${HMAC_SECRET}   # 수신거부 토큰 서명 키 (32자 이상, 운영 필수)
   jwt:
     secret: ${JWT_SECRET}
     access-ttl: 30m

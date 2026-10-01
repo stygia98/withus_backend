@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.withus.segment.mapper.SegmentMapper">
+
+	<sql id="segmentColumns">
+		s.segment_id, s.name, s.description, r.rule_json::text AS rule_json, s.created_by, s.created_at, s.updated_at
+	</sql>
+
+	<insert id="insert" useGeneratedKeys="true" keyProperty="segmentId" keyColumn="segment_id">
+		INSERT INTO segment (name, description, created_by) VALUES (#{name}, #{description}, #{createdBy})
+	</insert>
+
+	<insert id="insertRule">
+		INSERT INTO segment_rule (segment_id, rule_json) VALUES (#{segmentId}, CAST(#{ruleJson} AS jsonb))
+	</insert>
+
+	<select id="findById" resultType="com.withus.segment.domain.Segment">
+		SELECT <include refid="segmentColumns"/>
+		FROM segment s JOIN segment_rule r ON r.segment_id = s.segment_id
+		WHERE s.segment_id = #{segmentId}
+	</select>
+
+	<select id="findPage" resultType="com.withus.segment.domain.Segment">
+		SELECT <include refid="segmentColumns"/>
+		FROM segment s JOIN segment_rule r ON r.segment_id = s.segment_id
+		ORDER BY s.segment_id DESC
+		LIMIT #{limit} OFFSET #{offset}
+	</select>
+
+	<select id="count" resultType="long">
+		SELECT count(*) FROM segment
+	</select>
+
+	<update id="update">
+		UPDATE segment SET name = #{name}, description = #{description}, updated_at = now()
+		WHERE segment_id = #{segmentId}
+	</update>
+
+	<update id="updateRule">
+		UPDATE segment_rule SET rule_json = CAST(#{ruleJson} AS jsonb), updated_at = now()
+		WHERE segment_id = #{segmentId}
+	</update>
+
+	<!-- campaign 은 팀원2 테이블 — 조회만 (workflow-git.md 타 도메인 조회 규칙) -->
+	<select id="existsCampaign" resultType="boolean">
+		SELECT EXISTS (SELECT 1 FROM campaign WHERE segment_id = #{segmentId})
+	</select>
+
+	<!-- segment_rule 은 ON DELETE CASCADE -->
+	<delete id="delete">
+		DELETE FROM segment WHERE segment_id = #{segmentId}
+	</delete>
+
+	<!--
+		세그먼트 규칙 조건 (docs/plans/segment-sql.md 5장). 대상 조회·대상 수·미리보기가 모두 이 조각을 쓴다
+		연결어·필드·연산자는 enum 비교로 고정 문자열만 출력하고(Plan 10장 R1), 값은 모두 #{} 로 바인딩한다
+	-->
+	<sql id="logical">
+		<choose>
+			<when test="op == @com.withus.segment.domain.LogicalOperator@OR"> OR </when>
+			<otherwise> AND </otherwise>
+		</choose>
+	</sql>
+
+	<sql id="ruleWhere">
+		WHERE deleted_yn = 'N' AND (
+		<foreach collection="q.groups" item="g" index="gi">
+			<if test="gi > 0"><bind name="op" value="q.operator"/><include refid="logical"/></if>
+			(
+			<foreach collection="g.conditions" item="c" index="ci">
+				<if test="ci > 0"><bind name="op" value="g.operator"/><include refid="logical"/></if>
+				<choose>
+					<when test="c.field == @com.withus.segment.domain.SegmentField@REGION">region_code</when>
+					<when test="c.field == @com.withus.segment.domain.SegmentField@AGE">birth_date</when>
+					<when test="c.field == @com.withus.segment.domain.SegmentField@TOTAL_PURCHASE">total_purchase</when>
+					<when test="c.field == @com.withus.segment.domain.SegmentField@JOINED_AT">joined_at</when>
+					<when test="c.field == @com.withus.segment.domain.SegmentField@EMAIL_CONSENT">email_consent_yn</when>
+					<when test="c.field == @com.withus.segment.domain.SegmentField@SMS_CONSENT">sms_consent_yn</when>
+					<when test="c.field == @com.withus.segment.domain.SegmentField@DORMANT">dormant_yn</when>
+				</choose>
+				<choose>
+					<when test="c.op == @com.withus.segment.domain.SegmentOperator@EQ"> = #{c.value}</when>
+					<when test="c.op == @com.withus.segment.domain.SegmentOperator@NE"> &lt;&gt; #{c.value}</when>
+					<when test="c.op == @com.withus.segment.domain.SegmentOperator@GT"> &gt; #{c.value}</when>
+					<when test="c.op == @com.withus.segment.domain.SegmentOperator@GTE"> &gt;= #{c.value}</when>
+					<when test="c.op == @com.withus.segment.domain.SegmentOperator@LT"> &lt; #{c.value}</when>
+					<when test="c.op == @com.withus.segment.domain.SegmentOperator@LTE"> &lt;= #{c.value}</when>
+					<when test="c.op == @com.withus.segment.domain.SegmentOperator@BETWEEN"> BETWEEN #{c.value} AND #{c.value2}</when>
+					<when test="c.op == @com.withus.segment.domain.SegmentOperator@IN">
+						IN <foreach collection="c.values" item="v" open="(" separator="," close=")">#{v}</foreach>
+					</when>
+				</choose>
+			</foreach>
+			)
+		</foreach>
+		)
+	</sql>
+
+	<select id="findTargetCustomerIds" resultType="long">
+		SELECT customer_id FROM customer <include refid="ruleWhere"/> ORDER BY customer_id
+	</select>
+
+	<select id="countTargets" resultType="long">
+		SELECT count(*) FROM customer <include refid="ruleWhere"/>
+	</select>
+
+	<select id="preview" resultType="com.withus.segment.dto.SegmentPreviewResponse">
+		SELECT count(*)                                        AS total,
+		       count(*) FILTER (WHERE email_consent_yn = 'Y') AS email_consent,
+		       count(*) FILTER (WHERE sms_consent_yn = 'Y')   AS sms_consent,
+		       count(*) FILTER (WHERE dormant_yn = 'Y')       AS dormant
+		FROM customer <include refid="ruleWhere"/>
+	</select>
+</mapper>

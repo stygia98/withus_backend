@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.withus.customer.mapper.CustomerActivityMapper">
+
+	<!-- ponytail: 최근 100건 고정. 고객 한 명의 발송이 이보다 많아 더 봐야 하면 page·size 로 -->
+	<select id="findSends" resultType="com.withus.customer.domain.SendActivity">
+		SELECT s.send_log_id, s.campaign_id, c.name AS campaign_name, s.channel, s.kind, s.status, s.error_message,
+		       s.created_at, s.sent_at,
+		       (SELECT min(e.occurred_at) FROM track_event e
+		        WHERE e.send_log_id = s.send_log_id AND e.event_type = 'OPEN' AND e.bot_yn = 'N') AS opened_at,
+		       (SELECT min(e.occurred_at) FROM track_event e
+		        WHERE e.send_log_id = s.send_log_id AND e.event_type = 'CLICK' AND e.bot_yn = 'N') AS clicked_at
+		FROM send_log s
+		LEFT JOIN campaign c ON c.campaign_id = s.campaign_id
+		WHERE s.customer_id = #{customerId}
+		ORDER BY s.created_at DESC, s.send_log_id DESC
+		LIMIT 100
+	</select>
+
+	<select id="findCoupons" resultType="com.withus.customer.domain.CouponActivity">
+		SELECT i.issue_id, i.coupon_id, c.name AS coupon_name,
+		       CASE WHEN i.used_at IS NOT NULL THEN 'USED'
+		            WHEN CURRENT_DATE &lt; c.valid_from THEN 'NOT_STARTED'
+		            WHEN CURRENT_DATE &gt; c.valid_to THEN 'EXPIRED'
+		            ELSE 'USABLE' END AS status,
+		       c.valid_from, c.valid_to, i.issued_at, i.used_at
+		FROM coupon_issue i
+		JOIN coupon c ON c.coupon_id = i.coupon_id
+		WHERE i.customer_id = #{customerId}
+		ORDER BY i.issued_at DESC, i.issue_id DESC
+	</select>
+</mapper>

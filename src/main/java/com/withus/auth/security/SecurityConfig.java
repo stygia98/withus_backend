@@ -3,6 +3,7 @@ package com.withus.auth.security;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -33,6 +34,13 @@ public class SecurityConfig {
 		"/api/v1/unsubscribe/one-click/**",
 		"/api/webhooks/**",
 	};
+
+	/**
+	 * PL 리뷰 대상(2026-10-01, 팀원2): 메일 본문 이미지는 수신자가 로그인 없이 봐야 해서 GET 만 공개한다.
+	 * 업로드(POST /api/v1/files/images)는 이 배열에 넣지 않아 인증·CSRF 를 그대로 받는다.
+	 * PRD 8.5: "S3 버킷은 이미지 경로만 공개 읽기 허용"과 같은 맥락 (local 은 /files/**, prod 는 S3 버킷 자체가 공개)
+	 */
+	private static final String PUBLIC_GET_FILES = "/files/**";
 
 	/** 인증 없이 접근하지만 CSRF 검사는 받는 경로 (PRD 9장: 로그인·재발급도 CSRF 대상) */
 	private static final String[] AUTH_ENTRY_PATHS = {
@@ -65,6 +73,7 @@ public class SecurityConfig {
 			.logout(AbstractHttpConfigurer::disable)
 			.authorizeHttpRequests(auth -> auth
 				.requestMatchers(PUBLIC_PATHS).permitAll()
+				.requestMatchers(HttpMethod.GET, PUBLIC_GET_FILES).permitAll()
 				.requestMatchers(AUTH_ENTRY_PATHS).permitAll()
 				.requestMatchers(API_DOC_PATHS).permitAll()
 				.requestMatchers("/error").permitAll()
