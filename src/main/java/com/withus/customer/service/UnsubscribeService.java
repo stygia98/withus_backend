@@ -10,8 +10,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.withus.common.domain.Channel;
 import com.withus.common.exception.BusinessException;
+import com.withus.common.privacy.Masking;
 import com.withus.common.token.UnsubscribeTokens;
-import com.withus.coupon.dto.PublicCouponResponse;
 import com.withus.customer.domain.Customer;
 import com.withus.customer.domain.CustomerErrorCode;
 import com.withus.customer.dto.UnsubscribeInfoResponse;
@@ -53,7 +53,7 @@ public class UnsubscribeService {
 			}
 		}
 		// 마스킹 규칙은 고객 공개 페이지 공통 (API_SPEC 8장)
-		return new UnsubscribeInfoResponse(PublicCouponResponse.maskName(c.getName()), channels, unsubscribed);
+		return new UnsubscribeInfoResponse(Masking.maskName(c.getName()), channels, unsubscribed);
 	}
 
 	/** 같은 요청을 다시 보내도 결과는 같다 (이력은 동의가 실제로 바뀔 때만) */
