@@ -1,9 +1,12 @@
 package com.withus.auth.mapper;
 
+import java.util.List;
+
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
 import com.withus.auth.domain.Member;
+import com.withus.auth.domain.Role;
 
 @Mapper
 public interface MemberMapper {
@@ -29,4 +32,13 @@ public interface MemberMapper {
 		@Param("newHash") String newHash);
 
 	void clearRefreshToken(long memberId);
+
+	/** 사용자 관리 목록 (member_id 순) */
+	List<Member> findAll();
+
+	boolean existsEmail(String email);
+
+	/** 역할·활성 여부 변경. null 이면 그대로 둔다. 다시 로그인하도록 Refresh 토큰도 지운다 */
+	int updateRoleAndActive(@Param("memberId") long memberId, @Param("role") Role role,
+		@Param("activeYn") String activeYn);
 }
