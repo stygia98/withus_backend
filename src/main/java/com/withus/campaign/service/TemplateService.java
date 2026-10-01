@@ -13,6 +13,7 @@ import com.withus.campaign.domain.TemplateErrorCode;
 import com.withus.campaign.mapper.TemplateMapper;
 import com.withus.common.domain.Channel;
 import com.withus.common.exception.BusinessException;
+import com.withus.common.exception.CommonErrorCode;
 import com.withus.common.response.PageResponse;
 
 /**
@@ -30,6 +31,9 @@ public class TemplateService {
 	private static final Set<String> ALLOWED_PLACEHOLDERS = Set.of(
 		"name", "email", "region", "totalPurchase", "couponUrl");
 
+	/** 고객 목록(CustomerService)과 같은 상한 */
+	private static final int MAX_PAGE_SIZE = 100;
+
 	private final TemplateMapper templateMapper;
 
 	public TemplateService(TemplateMapper templateMapper) {
@@ -37,6 +41,10 @@ public class TemplateService {
 	}
 
 	public PageResponse<Template> list(Channel channel, int page, int size) {
+		if (page < 0 || size < 1 || size > MAX_PAGE_SIZE) {
+			throw new BusinessException(CommonErrorCode.COMMON_INVALID_INPUT,
+				"page 는 0 이상, size 는 1~" + MAX_PAGE_SIZE, null);
+		}
 		String channelValue = channel == null ? null : channel.name();
 		List<Template> content = templateMapper.findList(channelValue, page * size, size);
 		long total = templateMapper.count(channelValue);

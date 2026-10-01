@@ -124,6 +124,13 @@ class TemplateControllerTest {
 	}
 
 	@Test
+	void 목록_size가_100_초과면_400() throws Exception {
+		mvc.perform(get("/api/v1/templates").cookie(access).param("size", "101"))
+			.andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.error.code").value("COMMON_INVALID_INPUT"));
+	}
+
+	@Test
 	void 허용되지_않은_치환자는_400() throws Exception {
 		createEmail("연락처", "제목", "연락처는 {{phone}} 입니다")
 			.andExpect(status().isBadRequest())
