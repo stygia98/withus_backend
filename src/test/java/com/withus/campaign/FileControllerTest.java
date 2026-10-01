@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -111,7 +112,8 @@ class FileControllerTest {
 	void 인증_없이_업로드하면_401() throws Exception {
 		MockMultipartFile file = new MockMultipartFile("file", "선물.jpg", "image/jpeg", "x".getBytes());
 
-		mvc.perform(multipart("/api/v1/files/images").file(file))
+		// CSRF 는 통과시켜야 인증 부재로 인한 401 을 검증할 수 있다 (CSRF 필터가 인증보다 먼저 막아 403 이 되는 것 방지)
+		mvc.perform(multipart("/api/v1/files/images").file(file).with(csrf()))
 			.andExpect(status().isUnauthorized());
 	}
 }
