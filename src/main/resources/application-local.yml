@@ -11,6 +11,8 @@ spring:
     locations: classpath:db/migration,classpath:db/migration/local
 
 withus:
+  mail:
+    type: smtp
   storage:
     type: local
     local-path: ./uploads
