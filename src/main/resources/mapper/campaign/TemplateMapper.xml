@@ -41,7 +41,7 @@
 		DELETE FROM template WHERE template_id = #{templateId}
 	</delete>
 
-	<select id="existsInUseByStatus" resultType="boolean">
+	<select id="existsInUseByStatus" resultType="boolean" flushCache="true">
 		SELECT EXISTS (
 			SELECT 1 FROM campaign c
 			WHERE c.status IN ('SCHEDULED', 'ACTIVE', 'PAUSED')
@@ -56,11 +56,13 @@
 		)
 	</select>
 
-	<select id="existsReferenced" resultType="boolean">
+	<select id="existsReferenced" resultType="boolean" flushCache="true">
 		SELECT EXISTS (
 			SELECT 1 FROM campaign WHERE template_id = #{templateId}
 			UNION ALL
 			SELECT 1 FROM workflow_step WHERE config_json ->> 'templateId' = #{templateId}::text
+			UNION ALL
+			SELECT 1 FROM track_link WHERE template_id = #{templateId}
 		)
 	</select>
 </mapper>

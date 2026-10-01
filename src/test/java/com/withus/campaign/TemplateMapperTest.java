@@ -72,14 +72,18 @@ class TemplateMapperTest {
 
 	@Test
 	void CRUD_흐름_생성_목록_상세_수정_삭제() {
+		// 시드 데이터가 있어도 통과하도록 절대값(0건)이 아니라 전후 차이로 검증한다
+		long emailCountBefore = templateMapper.count("EMAIL");
+		long smsCountBefore = templateMapper.count("SMS");
+
 		Template template = newTemplate(Channel.EMAIL, "환영 메일");
 		templateMapper.insert(template);
 		assertThat(template.getTemplateId()).isNotNull();
 
 		List<Template> list = templateMapper.findList("EMAIL", 0, 20);
 		assertThat(list).extracting(Template::getTemplateId).contains(template.getTemplateId());
-		assertThat(templateMapper.count("EMAIL")).isGreaterThanOrEqualTo(1);
-		assertThat(templateMapper.count("SMS")).isEqualTo(0);
+		assertThat(templateMapper.count("EMAIL")).isEqualTo(emailCountBefore + 1);
+		assertThat(templateMapper.count("SMS")).isEqualTo(smsCountBefore);
 
 		Template found = templateMapper.findById(template.getTemplateId());
 		assertThat(found.getName()).isEqualTo("환영 메일");
@@ -124,6 +128,19 @@ class TemplateMapperTest {
 
 		jdbcTemplate.update("UPDATE campaign SET status = 'ACTIVE' WHERE campaign_id = ?", campaignId);
 		assertThat(templateMapper.existsInUseByStatus(template.getTemplateId())).isTrue();
+	}
+
+	@Test
+	void track_link이_참조하면_사용_중이_아니어도_삭제가_막힌다() {
+		// track_link.template_id 는 NOT NULL FK(ON DELETE 제약 없음) — 걸러내지 않으면 삭제 시 FK 위반(500)
+		Template template = newTemplate(Channel.EMAIL, "추적 링크용");
+		templateMapper.insert(template);
+		jdbcTemplate.update(
+			"INSERT INTO track_link (template_id, original_url, link_order) VALUES (?, ?, ?)",
+			template.getTemplateId(), "https://example.com", 1);
+
+		assertThat(templateMapper.existsInUseByStatus(template.getTemplateId())).isFalse();
+		assertThat(templateMapper.existsReferenced(template.getTemplateId())).isTrue();
 	}
 
 	@Test
