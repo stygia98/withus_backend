@@ -1,6 +1,9 @@
 package com.withus.tracking.service;
 
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -63,6 +66,29 @@ public class TrackingHtmlRewriter {
 		}
 		matcher.appendTail(result);
 		return insertPixel(result.toString(), trackingToken);
+	}
+
+	/**
+	 * 템플릿 원문에서 track_link 에 등록할 링크를 문서 순서대로, 중복 없이 뽑는다.
+	 * href 에 치환자({{...}})가 있는 링크는 고객마다 주소가 달라져 행이 고객 수만큼 늘고 개인정보가 남으므로 제외한다
+	 * ({{couponUrl}} 을 추적하지 않는 것과 같은 이유, PRD 8.1).
+	 */
+	public List<String> templateLinkUrls(String templateHtml) {
+		Set<String> urls = new LinkedHashSet<>();
+		if (templateHtml == null) {
+			return List.of();
+		}
+		Matcher matcher = ANCHOR.matcher(templateHtml);
+		while (matcher.find()) {
+			if (matcher.group(1) == null) {
+				continue; // 주석
+			}
+			String url = htmlUnescape(firstNonNull(matcher.group(2), matcher.group(3), matcher.group(4))).trim();
+			if (!url.contains("{{") && isTrackable(url)) {
+				urls.add(url);
+			}
+		}
+		return List.copyOf(urls);
 	}
 
 	/** 추적 대상인가: 우리 서비스의 수신거부·쿠폰·추적 주소가 아닌 http/https 링크 */
