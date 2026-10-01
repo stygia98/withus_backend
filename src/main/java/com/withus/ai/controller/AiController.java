@@ -2,15 +2,18 @@ package com.withus.ai.controller;
 
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.withus.ai.dto.CampaignReportResponse;
 import com.withus.ai.dto.CopyDraftRequest;
 import com.withus.ai.dto.CopyDraftResponse;
 import com.withus.ai.dto.SendTimeRecommendationResponse;
+import com.withus.ai.service.CampaignReportService;
 import com.withus.ai.service.CopyDraftService;
 import com.withus.ai.service.SendTimeRecommendationService;
 import com.withus.common.response.ApiResponse;
@@ -27,10 +30,13 @@ public class AiController {
 	private final CopyDraftService copyDraftService;
 	private final SendTimeRecommendationService sendTimeRecommendationService;
 
+	private final CampaignReportService campaignReportService;
+
 	public AiController(CopyDraftService copyDraftService,
-		SendTimeRecommendationService sendTimeRecommendationService) {
+		SendTimeRecommendationService sendTimeRecommendationService, CampaignReportService campaignReportService) {
 		this.copyDraftService = copyDraftService;
 		this.sendTimeRecommendationService = sendTimeRecommendationService;
+		this.campaignReportService = campaignReportService;
 	}
 
 	@Operation(summary = "AI-01 메일 문구 초안 3안",
@@ -55,5 +61,20 @@ public class AiController {
 	public ApiResponse<SendTimeRecommendationResponse> sendTimeRecommendations(@RequestParam long targetCount,
 		@RequestParam(required = false) String adYn) {
 		return ApiResponse.ok(sendTimeRecommendationService.recommend(targetCount));
+	}
+
+	@Operation(summary = "AI-03 캠페인 성과 요약 생성·재생성",
+		description = "집계 지표만 Gemini 에 보내 5문장 이내 요약을 ai_report 에 새로 저장한다. 성공 발송이 없으면 LLM 없이 안내 문장.")
+	@PreAuthorize("hasAnyRole('OWNER','MANAGER')")
+	@PostMapping("/reports/campaigns/{campaignId}")
+	public ApiResponse<CampaignReportResponse> generateReport(@PathVariable long campaignId) {
+		return ApiResponse.ok(campaignReportService.generate(campaignId));
+	}
+
+	@Operation(summary = "AI-03 최근 성과 요약 조회", description = "아직 요약이 없으면 data 는 null.")
+	@PreAuthorize("hasAnyRole('OWNER','MANAGER','STAFF')")
+	@GetMapping("/reports/campaigns/{campaignId}")
+	public ApiResponse<CampaignReportResponse> latestReport(@PathVariable long campaignId) {
+		return ApiResponse.ok(campaignReportService.latest(campaignId));
 	}
 }
