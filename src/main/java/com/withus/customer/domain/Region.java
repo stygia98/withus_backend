@@ -6,7 +6,7 @@ import com.withus.common.exception.BusinessException;
 
 /**
  * 시·도 코드 (PRD F-01: 시/도명 → 코드). customer.region_code 와 세그먼트 region 조건에 쓴다
- * TODO(PL 확인): 문서에는 SEOUL·GYEONGGI 만 있어 나머지 코드명은 제안안
+ * 코드 전체 목록은 이 enum 이 기준이다 (DB_SCHEMA 시드 절: 팀원1이 정규화 매핑에서 확정)
  */
 public enum Region {
 
