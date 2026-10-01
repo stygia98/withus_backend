@@ -22,6 +22,8 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.test.context.event.ApplicationEvents;
+import org.springframework.test.context.event.RecordApplicationEvents;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -30,17 +32,22 @@ import org.springframework.transaction.annotation.Transactional;
 import com.jayway.jsonpath.JsonPath;
 import com.withus.auth.domain.Role;
 import com.withus.auth.security.AuthMember;
+import com.withus.customer.domain.CustomerDeletedEvent;
+import com.withus.customer.domain.CustomerRegisteredEvent;
 
 /** 고객 개별 관리 API (PRD F-02, API_SPEC 3장). 로컬 Docker DB 를 쓰고 테스트마다 롤백한다 */
 @SpringBootTest
 @AutoConfigureMockMvc
 @Transactional
+@RecordApplicationEvents
 class CustomerApiTest {
 
 	@Autowired
 	MockMvc mvc;
 	@Autowired
 	JdbcTemplate jdbc;
+	@Autowired
+	ApplicationEvents events;
 
 	String email;
 
@@ -72,6 +79,19 @@ class CustomerApiTest {
 			"SELECT channel || ':' || coalesce(before_yn, '-') || '>' || after_yn || ':' || source"
 				+ " FROM consent_history WHERE customer_id = ?", String.class, id);
 		assertThat(history).containsExactly("EMAIL:->Y:ADMIN");
+	}
+
+	@Test
+	void 등록과_삭제는_워크플로우_연동_이벤트를_발행한다() throws Exception {
+		long id = idOf(create(email).andExpect(status().isOk()));
+		assertThat(events.stream(CustomerRegisteredEvent.class)).containsExactly(new CustomerRegisteredEvent(id));
+
+		call(delete("/api/v1/customers/" + id), Role.MANAGER).andExpect(status().isOk());
+		assertThat(events.stream(CustomerDeletedEvent.class)).containsExactly(new CustomerDeletedEvent(id));
+
+		create(email.toUpperCase()).andExpect(status().isOk()); // 삭제 후 재등록은 새 고객 → 새 이벤트
+		create(email).andExpect(status().isConflict());
+		assertThat(events.stream(CustomerRegisteredEvent.class)).as("409 로 실패한 등록은 발행하지 않는다").hasSize(2);
 	}
 
 	@Test
