@@ -101,6 +101,24 @@
 		DELETE FROM suppression WHERE channel = #{channel} AND value = #{value}
 	</delete>
 
+	<!-- 발송 큐 적재·발송 직전 재확인용 (PRD 8.2). 휴면은 보지 않는다 (F-11: 휴면도 발송 가능) -->
+	<select id="isSendable" resultType="boolean">
+		SELECT EXISTS (
+			SELECT 1 FROM customer c
+			WHERE c.customer_id = #{customerId} AND c.deleted_yn = 'N'
+			<choose>
+				<when test="channel == @com.withus.common.domain.Channel@EMAIL">
+					AND c.email_consent_yn = 'Y'
+					AND NOT EXISTS (SELECT 1 FROM suppression s WHERE s.channel = 'EMAIL' AND s.value = c.email)
+				</when>
+				<otherwise>
+					AND c.sms_consent_yn = 'Y'
+					AND NOT EXISTS (SELECT 1 FROM suppression s WHERE s.channel = 'SMS' AND s.value = c.phone)
+				</otherwise>
+			</choose>
+		)
+	</select>
+
 	<select id="findConsentHistory" resultType="com.withus.customer.domain.ConsentHistory">
 		SELECT history_id, channel, before_yn, after_yn, source, note, changed_at
 		FROM consent_history WHERE customer_id = #{customerId}
