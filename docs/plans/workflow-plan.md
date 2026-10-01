@@ -1,7 +1,7 @@
 # 워크플로우 엔진 설계 Plan
 
 - 작성자: 팀원2 (campaign·workflow)
-- 상태: **PL 승인 대기**
+- 상태: **PL 승인 완료** (backend PR #20) — **구현 전 맨 아래 "11. PL 승인 결과"를 먼저 읽는다.** 1~9장과 11장이 다르면 11장을 따른다
 - 근거: PRD 6장(워크플로우 엔진 명세)·8.2(발송 큐 연동)·10.1(연결 인터페이스)·10.3(완료 기준), DB_SCHEMA 5.2(config_json)·6장(상태 전이)·7장(쿼리 패턴), API_SPEC 6장(캠페인·워크플로우)
 
 > 이 Plan은 코드 작성 전 PL 승인을 받기 위한 문서다(CLAUDE.md "워크플로우 엔진은 코드를 쓰기 전에 Plan을 먼저 제시하고 승인받는다"). W3 구현(구조 검증·엔진·트리거·상태 전이)은 이 Plan 승인 이후 시작한다. 발송 큐 Plan(`send-queue-plan.md`, 승인 완료)과 겹치는 송신 로직(발송 직전 재확인·렌더링·재시도)은 다시 다루지 않고 연결점만 명시한다.
@@ -176,13 +176,43 @@ WHERE status = 'RUNNING' AND updated_at < now() - INTERVAL '10 minutes';
 
 ## 10. PL 승인
 
-- **승인 상태: 승인 대기.**
+- **승인 상태: 승인 완료.** 반영 사항과 미확정 사항 답변은 11장에 기록했다.
 - CLAUDE.md("워크플로우 엔진은 코드를 쓰기 전에 Plan을 먼저 제시하고 승인받는다")에 따라, **W3 구현(구조 검증·엔진·트리거·상태 전이)은 아래 승인 기록이 남기 전에는 시작하지 않는다.**
 - 승인 절차: 이 파일을 포함한 PR을 올리거나 PL에게 직접 공유 → 8장 미확정 사항 3건에 대한 답변을 받아 반영 → PL이 PR 코멘트 또는 메시지로 승인 → 아래에 기록.
 
 ```
-승인자:
-승인 일시:
-승인 방식(PR 코멘트 / 메시지 등):
-미확정 사항 답변: (1) CUSTOMER_REGISTERED 세그먼트 멤버십 — / (2) 재시도 대상 범위 — / (3) WAIT 대기 상한 —
+승인자: PL
+승인 방식: backend PR #20 승인(Approve)·병합
+미확정 사항 답변: 11.3 참고
 ```
+
+## 11. PL 승인 결과
+
+Plan을 승인한다 (backend PR #20). 선점 시 PAUSED 제외, WAIT를 건너뛰는 `current_step_id` 설계, 인스턴스당 트랜잭션 1개(tx2)와 별도 재시도 기록(tx3), RUNNING 10분 복구는 그대로 진행한다. **아래 반영 사항은 1~9장보다 우선한다.**
+
+### 11.1 꼭 반영 (이대로 구현하면 결함)
+
+| # | 대상 | 결정 | 이유 |
+|---|---|---|---|
+| R1 | 4.2 `wake()` | `sendStep.nextStepId`가 WAIT이고 **그 WAIT의 `nextStepId`가 인스턴스의 `current_step_id`와 같을 때만** `next_run_at`을 채운다. SEND 다음이 WAIT가 아니면 아무것도 하지 않는다(엔진이 그 SEND에서 멈추지 않았으므로) | 지금 설계는 어느 SEND의 결과든 `next_run_at IS NULL`인 인스턴스를 깨운다. `SEND_A → CONDITION → SEND_B → WAIT`에서 A 결과가 먼저 오면 B를 기다리지 않고 깨어나 **WAIT를 건너뛴다** |
+| R2 | 3.1 SEND 직후 WAIT | 방금 적재한 send_log(`instance_id, step_id`)가 **PENDING일 때만** `next_run_at = NULL`. 적재 시점에 이미 SKIPPED 등 끝난 상태면 바로 `now + 대기시간` | 적재 시 수신거부로 SKIPPED가 된 건은 발송 큐를 거치지 않아 `wake()`가 오지 않는다. 그대로 두면 인스턴스가 **영원히 멈춘다** |
+| R3 | 3.2 `EMAIL_OPENED`·`EMAIL_CLICKED` | 판정 대상은 이 인스턴스의 **직전 메일(EMAIL) 발송 건**: `findLatestSendLogId(instanceId, EMAIL)` | PRD 6.3 "직전 메일 발송 건". 채널을 지정하지 않으면 `SEND_EMAIL → WAIT → SEND_SMS → WAIT → CONDITION`에서 SMS 건으로 판정한다 |
+
+### 11.2 수정 권장
+
+| # | 대상 | 결정 |
+|---|---|---|
+| R4 | 6.2 `CustomerRegisteredEvent` | `@TransactionalEventListener(phase = AFTER_COMMIT)` + `@Transactional(propagation = REQUIRES_NEW)`로 받는다. 같은 트랜잭션의 `@EventListener`면 워크플로우 오류가 고객 등록까지 실패시킨다(backend #11 리뷰). `CustomerDeletedEvent`는 7장대로 같은 트랜잭션(삭제와 취소가 함께 커밋·롤백) |
+
+### 11.3 8장 미확정 사항 답변
+
+| # | 결정 |
+|---|---|
+| Q1 세그먼트 멤버십 | `findTargetCustomers(segmentId).contains(customerId)`로 진행한다. 팀원1 측정(backend #8)에서 10만 명 중 6.6만 건 조회가 37ms라 건당 등록에는 충분하다. 동결 인터페이스(`SegmentService`)는 바꾸지 않고, `ponytail:` 주석으로 한계(세그먼트가 매우 크거나 등록이 잦으면 `isMember` 추가)를 남긴다 |
+| Q2 재시도 대상 | tx2 중 발생하는 **모든 예외**를 재시도한다(5분 뒤, 3회 초과 시 FAILED + `last_error`). 설정 오류처럼 재시도해도 같은 결과인 경우도 15분 안에 FAILED로 끝나므로 구분하지 않는다 |
+| Q3 WAIT 상한 | **1분 이상 90일 이하.** 워크플로우 저장 시 구조 검증에서 막는다 |
+
+### 11.4 진행 순서
+
+- 엔진은 발송 큐(`SendQueueService.enqueueWorkflowStep`, `SendDispatcher`)에 의존한다. **발송 큐 PR(`feature/campaign-send-queue-insert`)을 먼저 `dev`에 병합**한 뒤, `dev`에서 `feature/workflow-engine` 브랜치를 새로 만들어 구현한다.
+- `WorkflowWakeup`(4.1)은 구간 간 연결 인터페이스로 등록한다(PRD 10.1에 추가 대상, PL 리뷰).
