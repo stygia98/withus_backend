@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.withus.tracking.mapper.TrackEventMapper">
+
+	<select id="findSendByToken" resultType="com.withus.tracking.domain.TrackedSend">
+		SELECT send_log_id, kind, sent_at
+		FROM send_log
+		WHERE tracking_token = CAST(#{token} AS uuid)
+	</select>
+
+	<select id="findOriginalUrl" resultType="string">
+		SELECT original_url FROM track_link WHERE link_id = #{linkId}
+	</select>
+
+	<select id="countLinksOfSameTemplate" resultType="int">
+		SELECT count(*)
+		FROM track_link
+		WHERE template_id = (SELECT template_id FROM track_link WHERE link_id = #{linkId})
+	</select>
+
+	<select id="countDistinctClickedLinksSince" resultType="int">
+		SELECT count(DISTINCT link_id)
+		FROM track_event
+		WHERE send_log_id = #{sendLogId}
+		  AND event_type = 'CLICK'
+		  AND occurred_at &gt;= #{since}
+	</select>
+
+	<insert id="insert" useGeneratedKeys="true" keyProperty="eventId" keyColumn="event_id">
+		INSERT INTO track_event (send_log_id, event_type, link_id, user_agent, ip_hash, bot_yn, occurred_at)
+		VALUES (#{sendLogId}, #{eventType}, #{linkId}, #{userAgent}, #{ipHash}, #{botYn}, #{occurredAt})
+	</insert>
+
+	<update id="markBotSince">
+		UPDATE track_event
+		SET bot_yn = 'Y', updated_at = now()
+		WHERE send_log_id = #{sendLogId}
+		  AND occurred_at &gt;= #{since}
+		  AND bot_yn = 'N'
+	</update>
+
+	<select id="existsHumanEvent" resultType="boolean">
+		SELECT EXISTS (
+			SELECT 1
+			FROM track_event e
+			JOIN send_log s ON s.send_log_id = e.send_log_id
+			WHERE e.send_log_id = #{sendLogId}
+			  AND e.event_type = #{eventType}
+			  AND e.bot_yn = 'N'
+			  AND s.kind = 'CAMPAIGN'
+		)
+	</select>
+</mapper>
