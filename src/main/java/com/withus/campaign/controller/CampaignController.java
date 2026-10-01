@@ -1,0 +1,79 @@
+package com.withus.campaign.controller;
+
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+import com.withus.auth.security.AuthMember;
+import com.withus.campaign.domain.Campaign;
+import com.withus.campaign.domain.CampaignStatus;
+import com.withus.campaign.domain.CampaignType;
+import com.withus.campaign.dto.CampaignCreateRequest;
+import com.withus.campaign.dto.CampaignResponse;
+import com.withus.campaign.dto.CampaignUpdateRequest;
+import com.withus.campaign.service.CampaignService;
+import com.withus.common.response.ApiResponse;
+import com.withus.common.response.PageResponse;
+
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
+
+@Tag(name = "캠페인", description = "일회성·워크플로우 캠페인 CRUD (API_SPEC 6장)")
+@RestController
+@RequestMapping("/api/v1/campaigns")
+public class CampaignController {
+
+	private final CampaignService campaignService;
+
+	public CampaignController(CampaignService campaignService) {
+		this.campaignService = campaignService;
+	}
+
+	@Operation(summary = "캠페인 목록", description = "type·status 필터(생략 시 전체). page 는 0부터, size 기본 20.")
+	@PreAuthorize("hasAnyRole('OWNER','MANAGER','STAFF')")
+	@GetMapping
+	public ApiResponse<PageResponse<CampaignResponse>> list(
+		@RequestParam(required = false) CampaignType type,
+		@RequestParam(required = false) CampaignStatus status,
+		@RequestParam(defaultValue = "0") int page,
+		@RequestParam(defaultValue = "20") int size) {
+		PageResponse<Campaign> result = campaignService.list(type, status, page, size);
+		PageResponse<CampaignResponse> body = PageResponse.of(
+			result.content().stream().map(CampaignResponse::from).toList(),
+			result.page(), result.size(), result.totalElements());
+		return ApiResponse.ok(body);
+	}
+
+	@Operation(summary = "캠페인 상세")
+	@PreAuthorize("hasAnyRole('OWNER','MANAGER','STAFF')")
+	@GetMapping("/{campaignId}")
+	public ApiResponse<CampaignResponse> detail(@PathVariable long campaignId) {
+		return ApiResponse.ok(CampaignResponse.from(campaignService.getOrThrow(campaignId)));
+	}
+
+	@Operation(summary = "캠페인 생성", description = "항상 DRAFT 로 만들어진다. 오류: CAMPAIGN_COUPON_REQUIRED(422).")
+	@PreAuthorize("hasAnyRole('OWNER','MANAGER')")
+	@PostMapping
+	public ApiResponse<CampaignResponse> create(@Valid @RequestBody CampaignCreateRequest request,
+		@AuthenticationPrincipal AuthMember me) {
+		Campaign campaign = campaignService.create(request.toCampaign(), me.memberId());
+		return ApiResponse.ok(CampaignResponse.from(campaign));
+	}
+
+	@Operation(summary = "캠페인 수정", description = "DRAFT 상태만 수정할 수 있다. 그 외 상태면 CAMPAIGN_INVALID_STATUS(409).")
+	@PreAuthorize("hasAnyRole('OWNER','MANAGER')")
+	@PutMapping("/{campaignId}")
+	public ApiResponse<CampaignResponse> update(@PathVariable long campaignId,
+		@Valid @RequestBody CampaignUpdateRequest request) {
+		Campaign campaign = campaignService.update(campaignId, request.toCampaign());
+		return ApiResponse.ok(CampaignResponse.from(campaign));
+	}
+}
