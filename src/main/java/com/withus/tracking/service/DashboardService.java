@@ -122,7 +122,7 @@ public class DashboardService {
 	 */
 	public CampaignAnalyticsResponse campaign(long campaignId, LocalDate from, LocalDate to) {
 		String name = requireCampaignName(campaignId);
-		Period period = Period.of(from, to);
+		SendDateBounds period = SendDateBounds.of(from, to);
 		return CampaignAnalyticsResponse.of(campaignId, name, from, to,
 			SendKpi.of(dashboardMapper.sendStats(campaignId, null, period.fromTs(), period.toTs())));
 	}
@@ -130,7 +130,7 @@ public class DashboardService {
 	/** 워크플로우 발송 단계별 KPI. 단계 수가 최대 15개(노드 제한)라 단계마다 같은 집계 SQL 을 쓴다 — 캠페인 KPI 와 정의를 맞추기 위해 */
 	public CampaignStepsResponse steps(long campaignId, LocalDate from, LocalDate to) {
 		String name = requireCampaignName(campaignId);
-		Period period = Period.of(from, to);
+		SendDateBounds period = SendDateBounds.of(from, to);
 		String type = dashboardMapper.campaignType(campaignId);
 		List<CampaignStepsResponse.StepAnalytics> steps = "WORKFLOW".equals(type)
 			? dashboardMapper.sendSteps(campaignId).stream()
@@ -151,13 +151,13 @@ public class DashboardService {
 	}
 
 	/** 날짜(한국 시간, 양 끝 포함) → 집계 SQL 의 [fromTs, toTs). 생략한 쪽은 null(제한 없음) */
-	private record Period(OffsetDateTime fromTs, OffsetDateTime toTs) {
+	private record SendDateBounds(OffsetDateTime fromTs, OffsetDateTime toTs) {
 
-		static Period of(LocalDate from, LocalDate to) {
+		static SendDateBounds of(LocalDate from, LocalDate to) {
 			if (from != null && to != null && from.isAfter(to)) {
 				throw invalid("from 은 to 보다 늦을 수 없습니다.");
 			}
-			return new Period(from == null ? null : from.atStartOfDay(SEOUL).toOffsetDateTime(),
+			return new SendDateBounds(from == null ? null : from.atStartOfDay(SEOUL).toOffsetDateTime(),
 				to == null ? null : to.plusDays(1).atStartOfDay(SEOUL).toOffsetDateTime());
 		}
 	}
