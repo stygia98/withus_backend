@@ -25,6 +25,7 @@ import com.withus.campaign.mapper.TemplateMapper;
 import com.withus.campaign.service.SendDispatcher;
 import com.withus.campaign.service.messaging.MessageSenderRouter;
 import com.withus.common.domain.Channel;
+import com.withus.customer.service.ConsentService;
 
 /**
  * 발송 디스패처 (발송 큐 Plan 3장) — 우선순위 선점, 속도 제한, 재시작 후 이어서 발송 검증
@@ -44,6 +45,8 @@ class SendDispatcherTest {
 	TemplateMapper templateMapper;
 	@Autowired
 	MessageSenderRouter messageSenderRouter;
+	@Autowired
+	ConsentService consentService;
 	@Autowired
 	MemberMapper memberMapper;
 	@Autowired
@@ -92,9 +95,13 @@ class SendDispatcherTest {
 	}
 
 	private long newCustomer() {
+		return newCustomer("Y");
+	}
+
+	private long newCustomer(String emailConsentYn) {
 		jdbcTemplate.update(
-			"INSERT INTO customer (email, joined_at, source, email_consent_yn) VALUES (?, now(), 'MANUAL', 'Y')",
-			"customer-" + UUID.randomUUID() + "@withus.local");
+			"INSERT INTO customer (email, joined_at, source, email_consent_yn) VALUES (?, now(), 'MANUAL', ?)",
+			"customer-" + UUID.randomUUID() + "@withus.local", emailConsentYn);
 		long customerId = jdbcTemplate.queryForObject("SELECT max(customer_id) FROM customer", Long.class);
 		customerIds.add(customerId);
 		return customerId;
@@ -150,12 +157,55 @@ class SendDispatcherTest {
 		sendDispatcher.dispatch(); // 전부 처리됨 (재시작 전 상태)
 
 		// 재시작을 흉내낸다: 완전히 새 SendDispatcher 인스턴스로 다시 호출해도 더 처리할 PENDING 이 없어야 한다
-		SendDispatcher restarted = new SendDispatcher(sendLogMapper, templateMapper, messageSenderRouter, 1, false);
+		SendDispatcher restarted = new SendDispatcher(sendLogMapper, templateMapper, messageSenderRouter,
+			consentService, 1, false);
 		restarted.dispatch();
 
 		Long pendingCount = jdbcTemplate.queryForObject(
 			"SELECT count(*) FROM send_log WHERE campaign_id = ? AND status = 'PENDING'", Long.class, campaignId);
 		assertThat(pendingCount).isZero();
+	}
+
+	@Test
+	void 적재_후_수신거부한_고객은_발송_직전_재확인에서_SKIPPED가_된다() {
+		long customerId = newCustomer("Y");
+		enqueue(customerId, SendLog.PRIORITY_CAMPAIGN_BULK);
+		jdbcTemplate.update("UPDATE customer SET email_consent_yn = 'N' WHERE customer_id = ?", customerId);
+
+		sendDispatcher.dispatch();
+
+		String status = jdbcTemplate.queryForObject(
+			"SELECT status FROM send_log WHERE campaign_id = ? AND customer_id = ?", String.class, campaignId,
+			customerId);
+		assertThat(status).isEqualTo("SKIPPED");
+	}
+
+	@Test
+	void 선점_이후_캠페인이_PAUSED되면_SKIPPED가_아니라_PENDING으로_되돌아간다() {
+		long customerId = newCustomer();
+		enqueue(customerId, SendLog.PRIORITY_CAMPAIGN_BULK);
+		jdbcTemplate.update("UPDATE campaign SET status = 'PAUSED' WHERE campaign_id = ?", campaignId);
+
+		// claimBatch 는 PAUSED 를 걸러내므로, 선점 이후 상태가 바뀐 상황을 흉내 내려면 재확인 로직을 직접 호출해야 한다
+		SendLog claimed = SendLog.builder()
+			.sendLogId(sendLogIdOf(customerId))
+			.campaignId(campaignId)
+			.customerId(customerId)
+			.channel(Channel.EMAIL)
+			.kind(SendKind.CAMPAIGN)
+			.build();
+		sendDispatcher.processOne(claimed);
+
+		String status = jdbcTemplate.queryForObject(
+			"SELECT status FROM send_log WHERE campaign_id = ? AND customer_id = ?", String.class, campaignId,
+			customerId);
+		assertThat(status).isEqualTo("PENDING");
+	}
+
+	private long sendLogIdOf(long customerId) {
+		return jdbcTemplate.queryForObject(
+			"SELECT send_log_id FROM send_log WHERE campaign_id = ? AND customer_id = ?", Long.class, campaignId,
+			customerId);
 	}
 
 	private OffsetDateTime sentAtOf(long customerId) {

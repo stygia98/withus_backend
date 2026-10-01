@@ -43,4 +43,13 @@ public interface SendLogMapper {
 
 	/** SES 웹훅용 — provider_message_id 로 send_log(고객 포함) 를 찾는다 (팀원1) */
 	SendLog findByProviderMessageId(@Param("providerMessageId") String providerMessageId);
+
+	/** 발송 직전 재확인(SendRecheck)용 — 선점 당시와 캠페인 상태가 바뀌었는지 다시 본다 */
+	String findCampaignStatus(@Param("campaignId") long campaignId);
+
+	/** 재확인 탈락(고객 삭제·동의 N·suppression·캠페인 COMPLETED): 종단 SKIPPED, 재시도하지 않는다 */
+	void recordSkipped(@Param("sendLogId") long sendLogId);
+
+	/** 재확인 보류(캠페인 PAUSED): next_attempt_at 은 바꾸지 않고 PENDING 으로 되돌린다(발송 큐 Plan 8장) */
+	void revertToPending(@Param("sendLogId") long sendLogId);
 }

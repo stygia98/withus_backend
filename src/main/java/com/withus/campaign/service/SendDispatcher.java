@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import com.withus.campaign.domain.SendKind;
 import com.withus.campaign.domain.SendLog;
 import com.withus.campaign.domain.Template;
 import com.withus.campaign.mapper.SendLogMapper;
@@ -14,6 +15,7 @@ import com.withus.campaign.mapper.TemplateMapper;
 import com.withus.campaign.service.messaging.MessageSenderRouter;
 import com.withus.campaign.service.messaging.OutboundMessage;
 import com.withus.campaign.service.messaging.SendResult;
+import com.withus.customer.service.ConsentService;
 
 /**
  * 발송 큐 디스패처 (발송 큐 Plan 3장) — 선점(tx1, 짧은 UPDATE 한 건으로 자동 커밋)
@@ -31,15 +33,18 @@ public class SendDispatcher {
 	private final SendLogMapper sendLogMapper;
 	private final TemplateMapper templateMapper;
 	private final MessageSenderRouter messageSenderRouter;
+	private final ConsentService consentService;
 	private final TokenBucket tokenBucket;
 	private final boolean schedulerEnabled;
 
 	public SendDispatcher(SendLogMapper sendLogMapper, TemplateMapper templateMapper,
-			MessageSenderRouter messageSenderRouter, @Value("${ses.max-send-rate}") int maxSendRate,
+			MessageSenderRouter messageSenderRouter, ConsentService consentService,
+			@Value("${ses.max-send-rate}") int maxSendRate,
 			@Value("${withus.scheduler.send-dispatcher.enabled:true}") boolean schedulerEnabled) {
 		this.sendLogMapper = sendLogMapper;
 		this.templateMapper = templateMapper;
 		this.messageSenderRouter = messageSenderRouter;
+		this.consentService = consentService;
 		this.tokenBucket = new TokenBucket(maxSendRate);
 		this.schedulerEnabled = schedulerEnabled;
 	}
@@ -70,7 +75,10 @@ public class SendDispatcher {
 	}
 
 	/** 선점된 한 건을 트랜잭션 밖에서 처리하고 결과를 기록한다 */
-	void processOne(SendLog sendLog) {
+	public void processOne(SendLog sendLog) {
+		if (!recheck(sendLog)) {
+			return; // recheck 안에서 SKIPPED 또는 PENDING 복귀를 이미 기록했다
+		}
 		tokenBucket.acquire();
 		OutboundMessage message = buildMessage(sendLog);
 		SendResult result = messageSenderRouter.send(message);
@@ -79,6 +87,31 @@ public class SendDispatcher {
 		} else {
 			sendLogMapper.recordFailed(sendLog.getSendLogId(), result.errorMessage());
 		}
+	}
+
+	/**
+	 * 발송 직전 재확인(SendRecheck, 발송 큐 Plan 7장 1~5번). 통과하면 true.
+	 * TEST(customer_id NULL)는 고객 관련 확인(1~3번)을 건너뛴다.
+	 * 시간창(6번)·쿠폰 유효기간(7번)은 재확인 2/3·렌더링 작업에서 끼워 넣는다.
+	 */
+	private boolean recheck(SendLog sendLog) {
+		if (sendLog.getKind() != SendKind.TEST
+				&& !consentService.isSendable(sendLog.getCustomerId(), sendLog.getChannel())) {
+			// isSendable 하나로 고객 삭제·수신동의 N·suppression 세 가지를 한꺼번에 본다(Plan 15장 B1)
+			sendLogMapper.recordSkipped(sendLog.getSendLogId());
+			return false;
+		}
+		String campaignStatus = sendLogMapper.findCampaignStatus(sendLog.getCampaignId());
+		if ("COMPLETED".equals(campaignStatus)) {
+			sendLogMapper.recordSkipped(sendLog.getSendLogId());
+			return false;
+		}
+		if ("PAUSED".equals(campaignStatus)) {
+			// 선점(claimBatch)은 PAUSED 를 걸러내지만, 선점 이후 바뀐 경우의 안전장치로 여기서도 본다(Plan 15장 A1)
+			sendLogMapper.revertToPending(sendLog.getSendLogId());
+			return false;
+		}
+		return true;
 	}
 
 	private OutboundMessage buildMessage(SendLog sendLog) {

@@ -64,4 +64,16 @@
 	<select id="findByProviderMessageId" resultType="com.withus.campaign.domain.SendLog">
 		SELECT * FROM send_log WHERE provider_message_id = #{providerMessageId}
 	</select>
+
+	<select id="findCampaignStatus" resultType="string">
+		SELECT status FROM campaign WHERE campaign_id = #{campaignId}
+	</select>
+
+	<update id="recordSkipped">
+		UPDATE send_log SET status = 'SKIPPED' WHERE send_log_id = #{sendLogId}
+	</update>
+
+	<update id="revertToPending">
+		UPDATE send_log SET status = 'PENDING' WHERE send_log_id = #{sendLogId}
+	</update>
 </mapper>
