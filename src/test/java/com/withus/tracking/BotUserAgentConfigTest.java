@@ -51,9 +51,22 @@ class BotUserAgentConfigTest {
 	}
 
 	@Test
+	void 키워드를_단어_안에_포함한_사람_기기는_봇이_아니다() {
+		// 'bot' 부분 일치로 지워지던 사람 UA (PR #30 리뷰)
+		assertThat(detector.isBotUserAgent(
+			"Mozilla/5.0 (Linux; Android 10; CUBOT X30) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Mobile Safari/537.36"))
+			.isFalse();
+		assertThat(detector.isBotUserAgent("Mozilla/5.0 (Linux; Android 12; Robotics Tab) Chrome/126.0 Safari/537.36"))
+			.isFalse();
+	}
+
+	@Test
 	void 스스로_봇이라고_밝힌_요청은_봇이다() {
 		assertThat(detector.isBotUserAgent("Mozilla/5.0 (compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)"))
 			.isTrue();
 		assertThat(detector.isBotUserAgent("Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)")).isTrue();
+		assertThat(detector.isBotUserAgent("Mozilla/5.0 (compatible; AhrefsBot/7.0; +http://ahrefs.com/robot/)")).isTrue();
+		assertThat(detector.isBotUserAgent("Mozilla/5.0 (compatible; Baiduspider/2.0)")).isTrue();
+		assertThat(detector.isBotUserAgent("Mozilla/5.0 (compatible; SecurityScanner/1.0)")).isTrue();
 	}
 }
