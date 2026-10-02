@@ -28,7 +28,7 @@ public enum Region {
 	GYEONGNAM("경상남도", "경남"),
 	JEJU("제주특별자치도", "제주", "제주도");
 
-	/** 정식명, 약칭, 옛 명칭 순 */
+	/** 정식명, 약칭, 옛 명칭 순. 약칭(두 번째)은 필수 — displayName() 이 쓴다 */
 	private final List<String> names;
 
 	Region(String... names) {
