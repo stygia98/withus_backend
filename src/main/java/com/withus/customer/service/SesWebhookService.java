@@ -14,6 +14,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import com.withus.campaign.service.SendQueueService;
 import com.withus.common.domain.Channel;
 
 import tools.jackson.core.JacksonException;
@@ -24,6 +25,7 @@ import tools.jackson.databind.ObjectMapper;
  * SES 반송·스팸신고 웹훅 (PRD 8.2, API_SPEC 9장). 인증 없이 열려 있으므로 SNS 서명과 토픽 ARN 을 확인한 요청만 처리한다
  * - 검증 실패·형식 오류는 로그만 남기고 무시한다 (응답은 항상 200)
  * - 영구 반송(Permanent)·스팸신고 수신자 이메일 → suppression 추가 + 동의 N (SuppressionService). 일시 반송은 무시
+ * - 같은 경우 원 발송 건(mail.messageId = provider_message_id)을 BOUNCED 로 기록한다 (send_log 는 팀원2 소유라 SendQueueService 로)
  * - 외부 호출(인증서·구독 확인)은 트랜잭션 밖에서 한다
  */
 @Service
@@ -43,13 +45,16 @@ public class SesWebhookService {
 	private final ObjectMapper objectMapper;
 	private final SnsHttpClient snsHttpClient;
 	private final SuppressionService suppressionService;
+	private final SendQueueService sendQueueService;
 	private final String topicArn;
 
 	public SesWebhookService(ObjectMapper objectMapper, SnsHttpClient snsHttpClient,
-		SuppressionService suppressionService, @Value("${ses.topic-arn:}") String topicArn) {
+		SuppressionService suppressionService, SendQueueService sendQueueService,
+		@Value("${ses.topic-arn:}") String topicArn) {
 		this.objectMapper = objectMapper;
 		this.snsHttpClient = snsHttpClient;
 		this.suppressionService = suppressionService;
+		this.sendQueueService = sendQueueService;
 		this.topicArn = topicArn;
 	}
 
@@ -103,6 +108,10 @@ public class SesWebhookService {
 			recipients = ses.path("complaint").path("complainedRecipients");
 		} else {
 			return;
+		}
+		String messageId = text(ses.path("mail"), "messageId");
+		if (messageId != null && !messageId.isBlank()) {
+			sendQueueService.markBounced(messageId);
 		}
 		// 수신자 주소 기준으로 거부한다: 고객이 아직 없거나 삭제됐어도 이후 등록·발송에서 걸러진다 (PRD 7장)
 		for (JsonNode r : recipients) {

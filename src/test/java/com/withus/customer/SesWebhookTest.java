@@ -74,11 +74,14 @@ class SesWebhookTest {
 		String email = email();
 		long id = customer(email);
 		String unknown = email();
+		String messageId = sentLog(id, email);
 
 		send(notification("Bounce", """
+			"mail":{"messageId":"%s"},
 			"bounce":{"bounceType":"Permanent","bouncedRecipients":[{"emailAddress":"%s"},{"emailAddress":"%s"}]}
-			""".formatted(email.toUpperCase(), unknown), "1"));
+			""".formatted(messageId, email.toUpperCase(), unknown), "1"));
 
+		assertThat(sendStatus(messageId)).isEqualTo("BOUNCED");
 		assertThat(consent(id)).isEqualTo("N");
 		assertThat(reason(email)).isEqualTo("BOUNCE");
 		// 고객이 없는 주소도 목록에 남아 이후 등록·업로드 때 걸러진다
@@ -91,11 +94,14 @@ class SesWebhookTest {
 	void 스팸신고는_COMPLAINT_로_거부한다_서명버전2() throws Exception {
 		String email = email();
 		long id = customer(email);
+		String messageId = sentLog(id, email);
 
 		send(notification("Complaint", """
+			"mail":{"messageId":"%s"},
 			"complaint":{"complainedRecipients":[{"emailAddress":"%s"}]}
-			""".formatted(email), "2"));
+			""".formatted(messageId, email), "2"));
 
+		assertThat(sendStatus(messageId)).isEqualTo("BOUNCED");
 		assertThat(consent(id)).isEqualTo("N");
 		assertThat(reason(email)).isEqualTo("COMPLAINT");
 	}
@@ -104,28 +110,31 @@ class SesWebhookTest {
 	void 일시_반송_위조_서명_다른_토픽_SNS_가_아닌_인증서는_무시하고_200() throws Exception {
 		String email = email();
 		long id = customer(email);
+		String messageId = sentLog(id, email);
 		String bounce = """
-			"bounce":{"bounceType":"%s","bouncedRecipients":[{"emailAddress":"%s"}]}
-			""";
+			"mail":{"messageId":"%s"},
+			"bounce":{"bounceType":"%%s","bouncedRecipients":[{"emailAddress":"%s"}]}
+			""".formatted(messageId, email);
 
-		send(notification("Bounce", bounce.formatted("Transient", email), "1"));
+		send(notification("Bounce", bounce.formatted("Transient"), "1"));
 
-		Map<String, String> forged = notification("Bounce", bounce.formatted("Permanent", email), "1");
+		Map<String, String> forged = notification("Bounce", bounce.formatted("Permanent"), "1");
 		forged.put("Message", forged.get("Message").replace("Permanent", "Permanent "));
 		send(forged);
 
 		Map<String, String> otherTopic = new TreeMap<>(Map.of("TopicArn", TOPIC + "-other"));
-		otherTopic.putAll(withoutSignature(notification("Bounce", bounce.formatted("Permanent", email), "1"),
+		otherTopic.putAll(withoutSignature(notification("Bounce", bounce.formatted("Permanent"), "1"),
 			"TopicArn"));
 		send(sign(otherTopic, "1"));
 
-		Map<String, String> evilCert = notification("Bounce", bounce.formatted("Permanent", email), "1");
+		Map<String, String> evilCert = notification("Bounce", bounce.formatted("Permanent"), "1");
 		evilCert.put("SigningCertURL", "https://sns.ap-northeast-2.amazonaws.com.evil.example/cert.pem");
 		send(evilCert);
 
 		mvc.perform(post("/api/webhooks/ses").contentType(MediaType.TEXT_PLAIN).content("not json"))
 			.andExpect(status().isOk());
 
+		assertThat(sendStatus(messageId)).isEqualTo("SENT");
 		assertThat(consent(id)).isEqualTo("Y");
 		assertThat(jdbc.queryForObject("SELECT count(*) FROM suppression WHERE value = ?", Integer.class, email))
 			.isZero();
@@ -197,6 +206,18 @@ class SesWebhookTest {
 	private long customer(String email) {
 		return jdbc.queryForObject("INSERT INTO customer (email, joined_at, source, email_consent_yn, email_consent_at) "
 			+ "VALUES (?, CURRENT_DATE, 'MANUAL', 'Y', now()) RETURNING customer_id", Long.class, email);
+	}
+
+	/** SES 로 나간 발송 건 (send_log 는 팀원2 소유지만 테스트 준비 데이터라 직접 넣는다). provider_message_id 를 돌려준다 */
+	private String sentLog(long customerId, String email) {
+		String messageId = "ses-" + UUID.randomUUID();
+		jdbc.update("INSERT INTO send_log (customer_id, recipient, channel, status, kind, priority, provider_message_id, "
+			+ "sent_at) VALUES (?, ?, 'EMAIL', 'SENT', 'NOTICE', 2, ?, now())", customerId, email, messageId);
+		return messageId;
+	}
+
+	private String sendStatus(String messageId) {
+		return jdbc.queryForObject("SELECT status FROM send_log WHERE provider_message_id = ?", String.class, messageId);
 	}
 
 	private String consent(long customerId) {
