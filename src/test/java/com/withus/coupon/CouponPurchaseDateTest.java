@@ -2,7 +2,6 @@ package com.withus.coupon;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -28,8 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.withus.auth.domain.Role;
 import com.withus.auth.security.AuthMember;
-
-import jakarta.servlet.http.Cookie;
+import com.withus.common.TestCsrf;
 
 /**
  * 구매 등록(팀원1) → CouponService.markUsed(팀원3) 연결: 쿠폰 기간은 구매일 기준 (PRD F-10 ①, PL 리뷰 #16 재현 케이스).
@@ -50,12 +48,12 @@ class CouponPurchaseDateTest {
 	long memberId;
 	long customerId;
 
-	/** 실제 /auth/csrf 로 받은 쿠키. 공유 컨텍스트를 바꾸는 테스트용 CSRF 대신 쓴다 */
-	Cookie xsrf;
+	/** 실제 /auth/csrf 쿠키 방식 CSRF (common.TestCsrf) */
+	RequestPostProcessor csrf;
 
 	@BeforeEach
 	void setUp() throws Exception {
-		xsrf = mvc.perform(get("/api/v1/auth/csrf")).andReturn().getResponse().getCookie("XSRF-TOKEN");
+		csrf = TestCsrf.issue(mvc);
 		memberId = jdbc.queryForObject("INSERT INTO member (email, password, name, role) VALUES (?, 'x', '관리자', 'MANAGER') "
 			+ "RETURNING member_id", Long.class, "cpd-" + UUID.randomUUID() + "@withus.local");
 		customerId = jdbc.queryForObject("""
@@ -78,7 +76,7 @@ class CouponPurchaseDateTest {
 		return mvc.perform(post("/api/v1/customers/" + customerId + "/purchases")
 			.with(authentication(new UsernamePasswordAuthenticationToken(new AuthMember(memberId, Role.MANAGER), null,
 				List.of(new SimpleGrantedAuthority("ROLE_MANAGER")))))
-			.with(realCsrf())
+			.with(csrf)
 			.contentType(MediaType.APPLICATION_JSON)
 			.content("{\"amount\":45000,\"couponIssueId\":%d,\"purchasedAt\":\"%sT14:10:00+09:00\"}"
 				.formatted(issueId, purchaseDate)));
@@ -114,14 +112,5 @@ class CouponPurchaseDateTest {
 		mvc.perform(post("/api/v1/public/coupons/" + token + "/use"))
 			.andExpect(status().isUnprocessableContent())
 			.andExpect(jsonPath("$.error.code").value("COUPON_NOT_USABLE"));
-	}
-
-	/** 실제 쿠키·헤더 방식의 CSRF (AiCopyDraftApiTest 와 같은 방식, docs/workflow-git.md 테스트 작성 규칙) */
-	private RequestPostProcessor realCsrf() {
-		return request -> {
-			request.setCookies(xsrf);
-			request.addHeader("X-XSRF-TOKEN", xsrf.getValue());
-			return request;
-		};
 	}
 }

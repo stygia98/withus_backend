@@ -26,8 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.withus.auth.domain.Role;
 import com.withus.auth.security.AuthMember;
-
-import jakarta.servlet.http.Cookie;
+import com.withus.common.TestCsrf;
 
 /**
  * AI-03 성과 요약 API (API_SPEC 11장). Mock LLM 으로 Gemini 한도를 쓰지 않는다. 로컬 Docker DB, 롤백
@@ -45,12 +44,12 @@ class AiReportApiTest {
 	long memberId;
 	long segmentId;
 
-	/** 실제 /auth/csrf 로 받은 쿠키. 공유 컨텍스트를 바꾸는 테스트용 CSRF 대신 쓴다 */
-	Cookie xsrf;
+	/** 실제 /auth/csrf 쿠키 방식 CSRF (common.TestCsrf) */
+	RequestPostProcessor csrf;
 
 	@BeforeEach
 	void setUp() throws Exception {
-		xsrf = mvc.perform(get("/api/v1/auth/csrf")).andReturn().getResponse().getCookie("XSRF-TOKEN");
+		csrf = TestCsrf.issue(mvc);
 		memberId = jdbc.queryForObject("""
 			INSERT INTO member (email, password, name, role) VALUES (?, 'x', 'AI 리포트', 'MANAGER') RETURNING member_id
 			""", Long.class, "report-" + UUID.randomUUID() + "@withus.local");
@@ -86,7 +85,7 @@ class AiReportApiTest {
 		long campaignId = campaign("가을 감사 쿠폰 발송");
 		sentWithOpen(campaignId);
 
-		mvc.perform(post("/api/v1/ai/reports/campaigns/" + campaignId).with(auth(Role.MANAGER)).with(realCsrf()))
+		mvc.perform(post("/api/v1/ai/reports/campaigns/" + campaignId).with(auth(Role.MANAGER)).with(csrf))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.data.content").value(startsWith("[MOCK] '가을 감사 쿠폰 발송' 캠페인은 1건을 시도해 1건")))
 			.andExpect(jsonPath("$.data.model").value("mock"))
@@ -104,9 +103,9 @@ class AiReportApiTest {
 		long campaignId = campaign("재생성");
 		sentWithOpen(campaignId);
 
-		String first = mvc.perform(post("/api/v1/ai/reports/campaigns/" + campaignId).with(auth(Role.OWNER)).with(realCsrf()))
+		String first = mvc.perform(post("/api/v1/ai/reports/campaigns/" + campaignId).with(auth(Role.OWNER)).with(csrf))
 			.andReturn().getResponse().getContentAsString();
-		mvc.perform(post("/api/v1/ai/reports/campaigns/" + campaignId).with(auth(Role.OWNER)).with(realCsrf()))
+		mvc.perform(post("/api/v1/ai/reports/campaigns/" + campaignId).with(auth(Role.OWNER)).with(csrf))
 			.andExpect(status().isOk());
 
 		long latestId = jdbc.queryForObject("SELECT max(report_id) FROM ai_report WHERE campaign_id = ?", Long.class,
@@ -122,7 +121,7 @@ class AiReportApiTest {
 	void 성공_발송이_없으면_LLM_없이_안내_문장을_저장한다() throws Exception {
 		long campaignId = campaign("아직 안 보냄");
 
-		mvc.perform(post("/api/v1/ai/reports/campaigns/" + campaignId).with(auth(Role.MANAGER)).with(realCsrf()))
+		mvc.perform(post("/api/v1/ai/reports/campaigns/" + campaignId).with(auth(Role.MANAGER)).with(csrf))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.data.model").value("none"))
 			.andExpect(jsonPath("$.data.content").value("아직 성공한 발송이 없어 요약할 성과가 없습니다."));
@@ -139,7 +138,7 @@ class AiReportApiTest {
 
 	@Test
 	void 없는_캠페인은_404() throws Exception {
-		mvc.perform(post("/api/v1/ai/reports/campaigns/" + Long.MAX_VALUE).with(auth(Role.MANAGER)).with(realCsrf()))
+		mvc.perform(post("/api/v1/ai/reports/campaigns/" + Long.MAX_VALUE).with(auth(Role.MANAGER)).with(csrf))
 			.andExpect(status().isNotFound());
 	}
 
@@ -147,16 +146,7 @@ class AiReportApiTest {
 	void STAFF는_요약을_만들_수_없다() throws Exception {
 		long campaignId = campaign("권한");
 
-		mvc.perform(post("/api/v1/ai/reports/campaigns/" + campaignId).with(auth(Role.STAFF)).with(realCsrf()))
+		mvc.perform(post("/api/v1/ai/reports/campaigns/" + campaignId).with(auth(Role.STAFF)).with(csrf))
 			.andExpect(status().isForbidden());
-	}
-
-	/** 실제 쿠키·헤더 방식의 CSRF (AiCopyDraftApiTest 와 같은 방식, docs/workflow-git.md 테스트 작성 규칙) */
-	private RequestPostProcessor realCsrf() {
-		return request -> {
-			request.setCookies(xsrf);
-			request.addHeader("X-XSRF-TOKEN", xsrf.getValue());
-			return request;
-		};
 	}
 }

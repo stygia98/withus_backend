@@ -26,9 +26,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.withus.auth.domain.Role;
 import com.withus.auth.security.AuthMember;
+import com.withus.common.TestCsrf;
 import com.withus.coupon.service.CouponService;
-
-import jakarta.servlet.http.Cookie;
 
 /**
  * PRD 10.3 시연 시나리오를 잇는다:
@@ -58,12 +57,12 @@ class CouponConversionFlowTest {
 	long campaignId;
 	long couponId;
 
-	/** 실제 /auth/csrf 로 받은 쿠키. 공유 컨텍스트를 바꾸는 테스트용 CSRF 대신 쓴다 */
-	Cookie xsrf;
+	/** 실제 /auth/csrf 쿠키 방식 CSRF (common.TestCsrf) */
+	RequestPostProcessor csrf;
 
 	@BeforeEach
 	void setUp() throws Exception {
-		xsrf = mvc.perform(get("/api/v1/auth/csrf")).andReturn().getResponse().getCookie("XSRF-TOKEN");
+		csrf = TestCsrf.issue(mvc);
 		memberId = jdbc.queryForObject("INSERT INTO member (email, password, name, role) VALUES (?, 'x', '시연', 'MANAGER') "
 			+ "RETURNING member_id", Long.class, "flow-" + UUID.randomUUID() + "@withus.local");
 		long segmentId = jdbc.queryForObject("INSERT INTO segment (name, created_by) VALUES ('flow', ?) RETURNING segment_id",
@@ -124,7 +123,7 @@ class CouponConversionFlowTest {
 		// ② 관리자 구매 등록에서 쿠폰 선택 (팀원1 → CouponService.markUsed)
 		long issueId = jdbc.queryForObject("SELECT issue_id FROM coupon_issue WHERE send_log_id = ?", Long.class,
 			byPurchase.sendLogId());
-		mvc.perform(post("/api/v1/customers/" + byPurchase.customerId() + "/purchases").with(manager()).with(realCsrf())
+		mvc.perform(post("/api/v1/customers/" + byPurchase.customerId() + "/purchases").with(manager()).with(csrf)
 				.contentType(MediaType.APPLICATION_JSON)
 				.content("{\"amount\":45000,\"couponIssueId\":%d}".formatted(issueId)))
 			.andExpect(status().isOk());
@@ -137,14 +136,5 @@ class CouponConversionFlowTest {
 		mvc.perform(get("/api/v1/coupons/" + couponId).with(manager()))
 			.andExpect(jsonPath("$.data.issuedCount").value(3))
 			.andExpect(jsonPath("$.data.usedCount").value(2));
-	}
-
-	/** 실제 쿠키·헤더 방식의 CSRF (AiCopyDraftApiTest 와 같은 방식, docs/workflow-git.md 테스트 작성 규칙) */
-	private RequestPostProcessor realCsrf() {
-		return request -> {
-			request.setCookies(xsrf);
-			request.addHeader("X-XSRF-TOKEN", xsrf.getValue());
-			return request;
-		};
 	}
 }
