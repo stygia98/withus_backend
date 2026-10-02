@@ -35,6 +35,11 @@ public enum Region {
 		this.names = List.of(names);
 	}
 
+	/** 화면·치환자({{region}})에 쓰는 표시명 = 약칭 ("서울"). 프론트 지역 목록과 같다 */
+	public String displayName() {
+		return names.get(1);
+	}
+
 	/** 코드(대소문자 무시)·정식명·약칭·옛 명칭으로 찾는다. 없으면 CUSTOMER_INVALID_REGION */
 	public static Region from(String value) {
 		String v = value == null ? "" : value.trim();
