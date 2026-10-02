@@ -16,7 +16,6 @@ import com.withus.campaign.domain.CampaignErrorCode;
 import com.withus.campaign.domain.CampaignStatus;
 import com.withus.campaign.domain.CampaignType;
 import com.withus.campaign.domain.SendKind;
-import com.withus.campaign.domain.SendLog;
 import com.withus.campaign.domain.Template;
 import com.withus.campaign.dto.CampaignEstimateResponse;
 import com.withus.campaign.mapper.CampaignMapper;
@@ -216,8 +215,7 @@ public class CampaignService {
 		if (campaign.getType() == CampaignType.ONE_TIME) {
 			Template template = templateMapper.findById(campaign.getTemplateId());
 			List<Long> targetIds = segmentService.findTargetCustomers(campaign.getSegmentId());
-			sendQueueService.enqueueOneTime(campaignId, targetIds, template.getChannel(), SendKind.CAMPAIGN,
-				SendLog.PRIORITY_CAMPAIGN_BULK);
+			sendQueueService.enqueueOneTime(campaignId, targetIds, template.getChannel(), SendKind.CAMPAIGN);
 		}
 		campaign.setStatus(CampaignStatus.ACTIVE);
 		return campaign;

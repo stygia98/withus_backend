@@ -7,6 +7,8 @@ import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -29,6 +31,8 @@ import com.withus.customer.service.ConsentService;
  */
 @Component
 public class SendDispatcher {
+
+	private static final Logger log = LoggerFactory.getLogger(SendDispatcher.class);
 
 	/** 한 번 실행(dispatch 호출)에 처리할 건수 상한 — 스케줄러 풀(5)을 오래 점유하지 않게 한다 */
 	private static final int MAX_PER_RUN = 200;
@@ -86,15 +90,52 @@ public class SendDispatcher {
 			if (claimed.isEmpty()) {
 				return;
 			}
-			for (SendLog sendLog : claimed) {
+			for (int i = 0; i < claimed.size(); i++) {
+				SendLog sendLog = claimed.get(i);
 				try {
 					processOne(sendLog);
 				} catch (Exception e) {
+					if (Thread.currentThread().isInterrupted()) {
+						// 종료 중 인터럽트(TokenBucket 대기) — 남은 건이 발송 없이 attempt_count 만 소모하지 않도록
+						// 루프를 빠져나가고, 아직 끝내지 못한 건(현재 건 포함)을 PENDING 으로 되돌린다(PR #21 리뷰)
+						revertUnprocessed(claimed.subList(i, claimed.size()));
+						return;
+					}
 					// 템플릿 누락 등 MessageSender.send 이전 예외 — 이 건만 재시도로 돌리고 배치는 계속 진행한다(PR #21 리뷰)
-					retryOrFail(sendLog, e.getMessage());
+					safeRetryOrFail(sendLog, e.getMessage());
 				}
 				processed++;
 			}
+		}
+	}
+
+	/**
+	 * 재시도 기록(DB)까지 실패해도 예외가 dispatch() 밖으로 나가면 이미 선점한 나머지 건이 미발송 상태로
+	 * 10분 뒤 전부 FAILED 가 된다 — 이 건만 SENDING 으로 남겨 멈춤 복구에 맡기고 배치는 계속한다
+	 */
+	private void safeRetryOrFail(SendLog sendLog, String errorMessage) {
+		try {
+			retryOrFail(sendLog, errorMessage);
+		} catch (Exception e) {
+			log.error("재시도 기록 실패, SENDING 으로 남김 sendLogId={}", sendLog.getSendLogId(), e);
+		}
+	}
+
+	private void revertUnprocessed(List<SendLog> rest) {
+		for (SendLog sendLog : rest) {
+			try {
+				sendLogMapper.revertToPending(sendLog.getSendLogId());
+			} catch (Exception e) {
+				log.error("인터럽트 후 PENDING 복귀 실패, 멈춤 복구에 맡김 sendLogId={}", sendLog.getSendLogId(), e);
+			}
+		}
+	}
+
+	/** 결과 기록 UPDATE 가 status = 'SENDING' 조건 때문에 0행이면(멈춤 복구가 먼저 처리한 건) 경고만 남긴다 */
+	private void warnIfNotRecorded(int updatedRows, SendLog sendLog, String action) {
+		if (updatedRows == 0) {
+			log.warn("{} 건너뜀: 이미 SENDING 이 아님(멈춤 복구가 먼저 처리했을 수 있음) sendLogId={}", action,
+				sendLog.getSendLogId());
 		}
 	}
 
@@ -115,11 +156,26 @@ public class SendDispatcher {
 		}
 		SendResult result = messageSenderRouter.send(message.get());
 		if (result.success()) {
-			sendLogMapper.recordSent(sendLog.getSendLogId(), result.providerMessageId());
+			recordSentSafely(sendLog, result);
 		} else if (result.errorType() == ErrorType.TRANSIENT) {
 			retryOrFail(sendLog, result.errorMessage());
 		} else {
-			sendLogMapper.recordFailed(sendLog.getSendLogId(), result.errorMessage());
+			warnIfNotRecorded(sendLogMapper.recordFailed(sendLog.getSendLogId(), result.errorMessage()), sendLog,
+				"recordFailed");
+		}
+	}
+
+	/**
+	 * 발송은 이미 나갔다 — 성공 기록이 DB 오류로 실패해도 예외를 밖으로 던지면 dispatch() 가 재시도로 돌려
+	 * 같은 메일이 한 번 더 나간다. 로그만 남기고 SENDING 으로 두어 멈춤 복구가 UNKNOWN_RESULT 로 처리하게 한다
+	 * (CLAUDE.md 6장 5번 "중복 발송보다 누락이 낫다", PR #21 리뷰)
+	 */
+	private void recordSentSafely(SendLog sendLog, SendResult result) {
+		try {
+			warnIfNotRecorded(sendLogMapper.recordSent(sendLog.getSendLogId(), result.providerMessageId()), sendLog,
+				"recordSent");
+		} catch (Exception e) {
+			log.error("발송 성공 기록 실패 — 중복 발송을 피하려 재시도하지 않는다 sendLogId={}", sendLog.getSendLogId(), e);
 		}
 	}
 
@@ -127,12 +183,14 @@ public class SendDispatcher {
 	private void retryOrFail(SendLog sendLog, String errorMessage) {
 		int nextAttemptCount = sendLog.getAttemptCount() + 1;
 		if (nextAttemptCount > RETRY_INTERVALS.length) {
-			sendLogMapper.recordFailed(sendLog.getSendLogId(), errorMessage);
+			warnIfNotRecorded(sendLogMapper.recordFailed(sendLog.getSendLogId(), errorMessage), sendLog,
+				"recordFailed");
 			return;
 		}
 		OffsetDateTime nextAttemptAt = OffsetDateTime.now(ZoneId.of("Asia/Seoul"))
 			.plus(RETRY_INTERVALS[nextAttemptCount - 1]);
-		sendLogMapper.recordRetry(sendLog.getSendLogId(), nextAttemptAt, errorMessage);
+		warnIfNotRecorded(sendLogMapper.recordRetry(sendLog.getSendLogId(), nextAttemptAt, errorMessage), sendLog,
+			"recordRetry");
 	}
 
 	/**
@@ -146,24 +204,31 @@ public class SendDispatcher {
 		}
 		if (!consentService.isSendable(sendLog.getCustomerId(), sendLog.getChannel())) {
 			// isSendable 하나로 고객 삭제·수신동의 N·suppression 세 가지를 한꺼번에 본다(Plan 15장 B1)
-			sendLogMapper.recordSkipped(sendLog.getSendLogId());
+			warnIfNotRecorded(sendLogMapper.recordSkipped(sendLog.getSendLogId(), "NOT_SENDABLE"), sendLog,
+				"recordSkipped");
 			return false;
 		}
-		String campaignStatus = sendLogMapper.findCampaignStatus(sendLog.getCampaignId());
-		if ("COMPLETED".equals(campaignStatus)) {
-			sendLogMapper.recordSkipped(sendLog.getSendLogId());
-			return false;
-		}
-		if ("PAUSED".equals(campaignStatus)) {
-			// 선점(claimBatch)은 PAUSED 를 걸러내지만, 선점 이후 바뀐 경우의 안전장치로 여기서도 본다(Plan 15장 A1)
-			sendLogMapper.revertToPending(sendLog.getSendLogId());
-			return false;
+		// NOTICE(F-12) 는 campaign_id 가 없다(PRD 7장) — 캠페인 상태 확인 대상이 아니다. primitive long 파라미터에
+		// null 을 넘기면 언박싱 NPE 라 여기서 걸러낸다(PR #21 리뷰)
+		if (sendLog.getCampaignId() != null) {
+			String campaignStatus = sendLogMapper.findCampaignStatus(sendLog.getCampaignId());
+			if ("COMPLETED".equals(campaignStatus)) {
+				warnIfNotRecorded(sendLogMapper.recordSkipped(sendLog.getSendLogId(), "CAMPAIGN_COMPLETED"), sendLog,
+					"recordSkipped");
+				return false;
+			}
+			if ("PAUSED".equals(campaignStatus)) {
+				// 선점(claimBatch)은 PAUSED 를 걸러내지만, 선점 이후 바뀐 경우의 안전장치로 여기서도 본다(Plan 15장 A1)
+				warnIfNotRecorded(sendLogMapper.revertToPending(sendLog.getSendLogId()), sendLog, "revertToPending");
+				return false;
+			}
 		}
 		boolean adOrNotice = sendLog.getKind() == SendKind.NOTICE || (template != null && template.isAd());
 		if (adOrNotice) {
 			Optional<OffsetDateTime> holdUntil = sendWindow.holdUntil();
 			if (holdUntil.isPresent()) {
-				sendLogMapper.holdForSendWindow(sendLog.getSendLogId(), holdUntil.get());
+				warnIfNotRecorded(sendLogMapper.holdForSendWindow(sendLog.getSendLogId(), holdUntil.get()), sendLog,
+					"holdForSendWindow");
 				return false;
 			}
 		}
