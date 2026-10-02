@@ -144,6 +144,16 @@
 		SELECT name, email, region_code, total_purchase FROM customer WHERE customer_id = #{customerId}
 	</select>
 
+	<select id="findPreviewSource" resultType="com.withus.campaign.domain.CustomerPlaceholderSource">
+		SELECT name, email, region_code, total_purchase FROM customer WHERE customer_id = #{customerId} AND deleted_yn = 'N'
+	</select>
+
+	<select id="findPlaceholderSources" resultType="com.withus.campaign.domain.CustomerPlaceholderSource">
+		SELECT name, email, region_code, total_purchase FROM customer
+		WHERE deleted_yn = 'N' AND customer_id IN
+		<foreach collection="customerIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+	</select>
+
 	<select id="findCouponIdByCampaignId" resultType="long">
 		SELECT coupon_id FROM campaign WHERE campaign_id = #{campaignId}
 	</select>

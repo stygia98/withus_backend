@@ -9,4 +9,15 @@ public class CustomerPlaceholderSource {
 	private String email;
 	private String regionCode;
 	private Long totalPurchase;
+
+	// MyBatis 가 쓰는 기본 생성자
+	public CustomerPlaceholderSource() {
+	}
+
+	public CustomerPlaceholderSource(String name, String email, String regionCode, Long totalPurchase) {
+		this.name = name;
+		this.email = email;
+		this.regionCode = regionCode;
+		this.totalPurchase = totalPurchase;
+	}
 }

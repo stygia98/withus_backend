@@ -302,6 +302,18 @@ class SendLogMapperTest {
 	}
 
 	@Test
+	void 미리보기_샘플_조회는_삭제된_고객을_제외한다() {
+		// 같은 SqlSession 의 1차 캐시 때문에 같은 쿼리·파라미터는 jdbcTemplate 갱신 뒤에도 첫 결과가 돌아온다 —
+		// 살아 있는 고객과 삭제한 고객을 서로 다른 id 로 조회한다
+		long deletedCustomerId = newCustomer();
+		jdbcTemplate.update("UPDATE customer SET deleted_yn = 'Y' WHERE customer_id = ?", deletedCustomerId);
+
+		assertThat(sendLogMapper.findPreviewSource(customerId)).isNotNull();
+		assertThat(sendLogMapper.findPreviewSource(deletedCustomerId)).isNull();
+		assertThat(sendLogMapper.findPlaceholderSource(deletedCustomerId)).isNotNull(); // 발송용 조회는 그대로
+	}
+
+	@Test
 	void DRAFT_캠페인의_TEST_발송은_시작_전에도_선점된다() {
 		long draftCampaignId = newOneTimeCampaign(newSegment());
 		jdbcTemplate.update("UPDATE campaign SET status = 'DRAFT' WHERE campaign_id = ?", draftCampaignId);

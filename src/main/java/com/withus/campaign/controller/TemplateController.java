@@ -1,6 +1,7 @@
 package com.withus.campaign.controller;
 
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -18,6 +19,9 @@ import com.withus.campaign.dto.TemplateCreateRequest;
 import com.withus.campaign.dto.TemplateResponse;
 import com.withus.campaign.dto.TemplateUpdateRequest;
 import com.withus.campaign.service.TemplateService;
+import com.withus.campaign.service.TemplatePreviewService;
+import com.withus.campaign.dto.TemplatePreviewRequest;
+import com.withus.campaign.dto.TemplatePreviewResponse;
 import com.withus.common.domain.Channel;
 import com.withus.common.response.ApiResponse;
 import com.withus.common.response.PageResponse;
@@ -32,9 +36,11 @@ import jakarta.validation.Valid;
 public class TemplateController {
 
 	private final TemplateService templateService;
+	private final TemplatePreviewService templatePreviewService;
 
-	public TemplateController(TemplateService templateService) {
+	public TemplateController(TemplateService templateService, TemplatePreviewService templatePreviewService) {
 		this.templateService = templateService;
+		this.templatePreviewService = templatePreviewService;
 	}
 
 	@Operation(summary = "템플릿 목록", description = "channel 필터(EMAIL/SMS, 생략 시 전체). page 는 0부터, size 기본 20.")
@@ -92,5 +98,19 @@ public class TemplateController {
 		@AuthenticationPrincipal AuthMember me) {
 		Template copy = templateService.duplicate(templateId, me.memberId());
 		return ApiResponse.ok(TemplateResponse.from(copy));
+	}
+
+	@Operation(summary = "렌더링 미리보기",
+		description = "sampleCustomerId 고객 값으로 치환한 결과를 돌려준다(STAFF 는 고객 조회 권한이 없어 sampleCustomerId 를 무시하고 고정 샘플 값을 쓴다). "
+			+ "(광고) 문구는 포함하고 쿠폰 발급·추적 치환은 하지 않는다. segmentId 가 있으면 기본값으로 나갈 인원도 계산한다. "
+			+ "메일 html 은 sandbox iframe 으로만 렌더링하고, SMS 는 평문 text 로 돌려준다.")
+	@PreAuthorize("hasAnyRole('OWNER','MANAGER','STAFF')")
+	@PostMapping("/{templateId}/preview")
+	public ApiResponse<TemplatePreviewResponse> preview(@PathVariable long templateId,
+		@Valid @RequestBody TemplatePreviewRequest request, Authentication authentication) {
+		boolean canReadCustomer = authentication.getAuthorities().stream()
+			.anyMatch(a -> a.getAuthority().equals("ROLE_OWNER") || a.getAuthority().equals("ROLE_MANAGER"));
+		return ApiResponse.ok(templatePreviewService.preview(templateId, request.sampleCustomerId(),
+			request.segmentId(), canReadCustomer));
 	}
 }
