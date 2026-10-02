@@ -6,6 +6,12 @@ spring:
     # Mailpit SMTP
     host: localhost
     port: 1025
+    properties:
+      # JavaMail 은 기본 타임아웃이 없다 — 응답이 10분 넘게 지연되면 멈춤 복구(UNKNOWN_RESULT)와 겹쳐
+      # 늦은 응답이 결과를 덮어쓸 수 있어 짧게 둔다(PR #21 리뷰). 단위 ms
+      mail.smtp.connectiontimeout: 5000
+      mail.smtp.timeout: 15000
+      mail.smtp.writetimeout: 15000
   flyway:
     # local 전용 시드(R__seed_local.sql, 반복 실행)는 db/migration/local 에 둔다 (DB_SCHEMA.md 9장)
     locations: classpath:db/migration,classpath:db/migration/local
