@@ -26,7 +26,7 @@ import com.withus.auth.security.AuthMember;
 
 /**
  * 워크플로우 단계별 집계 (API_SPEC 10장, PRD F-09 "워크플로우 단계별로 집계").
- * 6.4 예시처럼 경로마다 다른 SEND 노드가 있을 때 단계마다 지표가 따로 나오는지 본다. 로컬 Docker DB, 롤백
+ * 6.4 예시처럼 경로마다 다른 SEND 노드가 있을 때 단계마다 지표가 따로 나오는지, 기간 필터가 맞게 걸리는지 본다. 로컬 Docker DB, 롤백
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -121,6 +121,53 @@ class CampaignStepsTest {
 			.andExpect(jsonPath("$.data.steps[2].stepId").value(broken))
 			.andExpect(jsonPath("$.data.steps[2].templateId").value(Matchers.nullValue()))
 			.andExpect(jsonPath("$.data.steps[2].kpi.sent").value(0));
+	}
+
+	/** sentAt 시각에 성공한 단계 발송 1건 */
+	private void sentAt(long campaignId, long stepId, String sentAt) {
+		long customerId = jdbc.queryForObject("""
+			INSERT INTO customer (name, email, joined_at, source) VALUES ('기간', ?, DATE '2031-01-01', 'MANUAL') RETURNING customer_id
+			""", Long.class, "period-" + UUID.randomUUID() + "@example.com");
+		jdbc.update("""
+			INSERT INTO send_log (campaign_id, step_id, customer_id, recipient, channel, kind, priority, status, sent_at)
+			VALUES (?, ?, ?, 'p@withus.local', 'EMAIL', 'CAMPAIGN', 2, 'SENT', CAST(? AS timestamptz))
+			""", campaignId, stepId, customerId, sentAt);
+	}
+
+	@Test
+	void 기간을_주면_그_기간_발송만_캠페인과_단계에_집계한다() throws Exception {
+		// PRD F-09 기간 필터. 한국 날짜 양 끝 포함: 9/30 23:59(한국)는 빠지고 10/7 23:59(한국)는 들어간다
+		long campaignId = workflowCampaign();
+		long s1 = step(campaignId, "SEND_EMAIL", "{\"templateId\": %d}".formatted(template("기간 메일")));
+		sentAt(campaignId, s1, "2031-09-30 23:59:00+09");
+		sentAt(campaignId, s1, "2031-10-01 00:00:00+09");
+		sentAt(campaignId, s1, "2031-10-07 23:59:00+09");
+		sentAt(campaignId, s1, "2031-10-08 00:00:00+09");
+
+		mvc.perform(get("/api/v1/analytics/campaigns/" + campaignId).param("from", "2031-10-01").param("to", "2031-10-07")
+				.with(auth(Role.STAFF)))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.data.from").value("2031-10-01"))
+			.andExpect(jsonPath("$.data.kpi.sent").value(2));
+		mvc.perform(get("/api/v1/analytics/campaigns/" + campaignId + "/steps").param("from", "2031-10-01")
+				.param("to", "2031-10-07").with(auth(Role.STAFF)))
+			.andExpect(jsonPath("$.data.steps[0].kpi.sent").value(2));
+		// 한쪽만 주면 다른 쪽은 제한 없음, 둘 다 없으면 전체
+		mvc.perform(get("/api/v1/analytics/campaigns/" + campaignId).param("from", "2031-10-08").with(auth(Role.STAFF)))
+			.andExpect(jsonPath("$.data.kpi.sent").value(1))
+			.andExpect(jsonPath("$.data.to").value(Matchers.nullValue()));
+		mvc.perform(get("/api/v1/analytics/campaigns/" + campaignId).with(auth(Role.STAFF)))
+			.andExpect(jsonPath("$.data.kpi.sent").value(4));
+	}
+
+	@Test
+	void 시작일이_종료일보다_늦으면_400() throws Exception {
+		long campaignId = workflowCampaign();
+
+		mvc.perform(get("/api/v1/analytics/campaigns/" + campaignId).param("from", "2031-10-08").param("to", "2031-10-01")
+				.with(auth(Role.STAFF)))
+			.andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.error.code").value("COMMON_INVALID_INPUT"));
 	}
 
 	@Test

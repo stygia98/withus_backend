@@ -111,31 +111,55 @@ public class DashboardService {
 		return new RecentEventsResponse(events, lastEventId);
 	}
 
-	/** 캠페인 KPI·전환 흐름 (기간 제한 없이 캠페인 전체) */
+	/** 캠페인 KPI·전환 흐름, 캠페인 전체 기간 (AI-03 요약 입력도 이 값) */
 	public CampaignAnalyticsResponse campaign(long campaignId) {
-		String name = dashboardMapper.campaignName(campaignId);
-		if (name == null) {
-			throw new BusinessException(CommonErrorCode.COMMON_NOT_FOUND);
-		}
-		return CampaignAnalyticsResponse.of(campaignId, name,
-			SendKpi.of(dashboardMapper.sendStats(campaignId, null, null, null)));
+		return campaign(campaignId, null, null);
+	}
+
+	/**
+	 * 캠페인 KPI·전환 흐름. from·to 는 발송일 기준 양 끝 포함이며 각각 생략할 수 있다(생략한 쪽은 제한 없음).
+	 * PRD F-09 기간 필터(최근 7/30일, 직접 지정)
+	 */
+	public CampaignAnalyticsResponse campaign(long campaignId, LocalDate from, LocalDate to) {
+		String name = requireCampaignName(campaignId);
+		SendDateBounds period = SendDateBounds.of(from, to);
+		return CampaignAnalyticsResponse.of(campaignId, name, from, to,
+			SendKpi.of(dashboardMapper.sendStats(campaignId, null, period.fromTs(), period.toTs())));
 	}
 
 	/** 워크플로우 발송 단계별 KPI. 단계 수가 최대 15개(노드 제한)라 단계마다 같은 집계 SQL 을 쓴다 — 캠페인 KPI 와 정의를 맞추기 위해 */
-	public CampaignStepsResponse steps(long campaignId) {
-		String name = dashboardMapper.campaignName(campaignId);
-		if (name == null) {
-			throw new BusinessException(CommonErrorCode.COMMON_NOT_FOUND);
-		}
+	public CampaignStepsResponse steps(long campaignId, LocalDate from, LocalDate to) {
+		String name = requireCampaignName(campaignId);
+		SendDateBounds period = SendDateBounds.of(from, to);
 		String type = dashboardMapper.campaignType(campaignId);
 		List<CampaignStepsResponse.StepAnalytics> steps = "WORKFLOW".equals(type)
 			? dashboardMapper.sendSteps(campaignId).stream()
 				.map(step -> new CampaignStepsResponse.StepAnalytics(step.getStepId(), step.getNodeType(),
 					step.getTemplateId(), step.getTemplateName(), step.getCouponId(),
-					SendKpi.of(dashboardMapper.sendStats(campaignId, step.getStepId(), null, null))))
+					SendKpi.of(dashboardMapper.sendStats(campaignId, step.getStepId(), period.fromTs(), period.toTs()))))
 				.toList()
 			: List.of();
-		return new CampaignStepsResponse(campaignId, name, type, steps);
+		return new CampaignStepsResponse(campaignId, name, type, from, to, steps);
+	}
+
+	private String requireCampaignName(long campaignId) {
+		String name = dashboardMapper.campaignName(campaignId);
+		if (name == null) {
+			throw new BusinessException(CommonErrorCode.COMMON_NOT_FOUND);
+		}
+		return name;
+	}
+
+	/** 날짜(한국 시간, 양 끝 포함) → 집계 SQL 의 [fromTs, toTs). 생략한 쪽은 null(제한 없음) */
+	private record SendDateBounds(OffsetDateTime fromTs, OffsetDateTime toTs) {
+
+		static SendDateBounds of(LocalDate from, LocalDate to) {
+			if (from != null && to != null && from.isAfter(to)) {
+				throw invalid("from 은 to 보다 늦을 수 없습니다.");
+			}
+			return new SendDateBounds(from == null ? null : from.atStartOfDay(SEOUL).toOffsetDateTime(),
+				to == null ? null : to.plusDays(1).atStartOfDay(SEOUL).toOffsetDateTime());
+		}
 	}
 
 	private static BusinessException invalid(String message) {
