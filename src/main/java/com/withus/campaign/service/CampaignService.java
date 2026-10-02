@@ -17,6 +17,7 @@ import com.withus.campaign.domain.CampaignStatus;
 import com.withus.campaign.domain.CampaignType;
 import com.withus.campaign.domain.SendKind;
 import com.withus.campaign.domain.Template;
+import com.withus.campaign.domain.TriggerType;
 import com.withus.campaign.dto.CampaignEstimateResponse;
 import com.withus.campaign.mapper.CampaignMapper;
 import com.withus.campaign.mapper.SendLogMapper;
@@ -26,6 +27,7 @@ import com.withus.common.exception.CommonErrorCode;
 import com.withus.common.response.PageResponse;
 import com.withus.coupon.domain.CouponErrorCode;
 import com.withus.segment.service.SegmentService;
+import com.withus.workflow.service.WorkflowTriggerService;
 
 /**
  * 캠페인 생성·수정·조회·예약·시작 (API_SPEC 6장). 일시정지·종료 등 나머지 상태 전이는
@@ -47,12 +49,13 @@ public class CampaignService {
 	private final SendLogMapper sendLogMapper;
 	private final SegmentService segmentService;
 	private final SendQueueService sendQueueService;
+	private final WorkflowTriggerService workflowTriggerService;
 	private final SendWindow sendWindow;
 	private final int maxSendRate;
 	private Clock clock = Clock.system(ZoneId.of("Asia/Seoul"));
 
 	public CampaignService(CampaignMapper campaignMapper, TemplateMapper templateMapper, SendLogMapper sendLogMapper,
-			SegmentService segmentService, SendQueueService sendQueueService,
+			SegmentService segmentService, SendQueueService sendQueueService, WorkflowTriggerService workflowTriggerService,
 			@Value("${withus.send-window.start}") String sendWindowStart,
 			@Value("${withus.send-window.end}") String sendWindowEnd,
 			@Value("${ses.max-send-rate}") int maxSendRate) {
@@ -61,6 +64,7 @@ public class CampaignService {
 		this.sendLogMapper = sendLogMapper;
 		this.segmentService = segmentService;
 		this.sendQueueService = sendQueueService;
+		this.workflowTriggerService = workflowTriggerService;
 		this.sendWindow = new SendWindow(LocalTime.parse(sendWindowStart), LocalTime.parse(sendWindowEnd));
 		this.maxSendRate = maxSendRate;
 	}
@@ -201,7 +205,7 @@ public class CampaignService {
 
 	/**
 	 * DRAFT·SCHEDULED → ACTIVE. 일회성은 지금 바로 큐에 적재한다(SendQueueService.enqueueOneTime).
-	 * 워크플로우는 상태만 바꾼다 — SEGMENT_SCHEDULED 즉시 트리거는 W3 트리거 작업이 연결한다
+	 * 워크플로우 SEGMENT_SCHEDULED 는 대상 전체의 인스턴스를 만든다(CUSTOMER_REGISTERED 는 상태만 바꾸고 등록 이벤트를 기다린다)
 	 */
 	public Campaign start(long campaignId) {
 		Campaign campaign = getOrThrow(campaignId);
@@ -217,6 +221,8 @@ public class CampaignService {
 			Template template = templateMapper.findById(campaign.getTemplateId());
 			List<Long> targetIds = segmentService.findTargetCustomers(campaign.getSegmentId());
 			sendQueueService.enqueueOneTime(campaignId, targetIds, template.getChannel(), SendKind.CAMPAIGN);
+		} else if (campaign.getTriggerType() == TriggerType.SEGMENT_SCHEDULED) {
+			workflowTriggerService.startSegmentScheduled(campaignId);
 		}
 		campaign.setStatus(CampaignStatus.ACTIVE);
 		return campaign;

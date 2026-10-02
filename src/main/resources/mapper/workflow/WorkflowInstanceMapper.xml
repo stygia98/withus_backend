@@ -50,4 +50,14 @@
 		UPDATE workflow_instance SET status = 'WAITING', next_run_at = now()
 		WHERE status = 'RUNNING' AND updated_at &lt; now() - INTERVAL '10 minutes'
 	</update>
+
+	<insert id="insertBatch">
+		INSERT INTO workflow_instance (campaign_id, customer_id, current_step_id, status, next_run_at)
+		SELECT #{campaignId}, c.customer_id, #{stepId}, 'WAITING', now()
+		FROM customer c
+		WHERE c.customer_id IN
+		<foreach collection="customerIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+		  AND c.deleted_yn = 'N'
+		ON CONFLICT (campaign_id, customer_id) DO NOTHING
+	</insert>
 </mapper>

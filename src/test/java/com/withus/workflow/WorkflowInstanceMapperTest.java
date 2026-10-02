@@ -148,4 +148,20 @@ class WorkflowInstanceMapperTest {
 		assertThat(stuckStatus).isEqualTo("WAITING");
 		assertThat(freshStatus).isEqualTo("RUNNING");
 	}
+
+	@Test
+	void insertBatch는_재실행해도_중복_생성하지_않고_삭제된_고객은_제외한다() {
+		long campaignId = newCampaign("ACTIVE");
+		stepId = newStep(campaignId);
+		long a = newCustomer();
+		long b = newCustomer();
+		long deleted = newCustomer();
+		jdbc.update("UPDATE customer SET deleted_yn = 'Y' WHERE customer_id = ?", deleted);
+
+		int first = workflowInstanceMapper.insertBatch(campaignId, stepId, List.of(a, b, deleted));
+		int second = workflowInstanceMapper.insertBatch(campaignId, stepId, List.of(a, b, deleted));
+
+		assertThat(first).isEqualTo(2);
+		assertThat(second).isZero();
+	}
 }

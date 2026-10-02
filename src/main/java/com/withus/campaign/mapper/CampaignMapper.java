@@ -50,6 +50,13 @@ public interface CampaignMapper {
 	 */
 	List<Long> findCompletable();
 
+	/**
+	 * 워크플로우 자동 완료 대상: SEGMENT_SCHEDULED 이고 ACTIVE 인데 인스턴스가 있으며 WAITING·RUNNING 이 없는 캠페인
+	 * (COMPLETED·FAILED·CANCELLED 만 남음 — FAILED 도 끝난 것으로 본다, 안 그러면 한 건 실패로 영원히 ACTIVE).
+	 * 인스턴스가 하나도 없으면(시작 직후 생성 전, 빈 세그먼트) 대상이 아니다
+	 */
+	List<Long> findCompletableWorkflow();
+
 	/** ACTIVE → COMPLETED, ended_at 설정(낙관적 검사). @return 바뀐 행 수 */
 	int complete(long campaignId);
 }
