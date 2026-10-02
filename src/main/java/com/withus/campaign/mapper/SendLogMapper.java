@@ -91,7 +91,8 @@ public interface SendLogMapper {
 	/** 일회성 캠페인의 아직 선점되지 않은 PENDING 적재분 삭제(시작 실패 뒤 재시작할 때 옛 대상이 남지 않게). @return 삭제 건수 */
 	int deleteUnstartedCampaignPending(@Param("campaignId") long campaignId);
 
-	/** 오늘(Asia/Seoul)이 쿠폰 유효기간(valid_from~valid_to) 안인가. 쿠폰 행이 없으면 null */
+	/** 오늘(Asia/Seoul)이 쿠폰 유효기간(valid_from~valid_to) 안인가 */
+	/** 쿠폰 행이 없으면 null — 호출하는 쪽은 Boolean.TRUE.equals 로 "없거나 기간 밖"을 함께 처리한다 */
 	Boolean isCouponValid(@Param("couponId") long couponId);
 
 	/** 재확인 이후 렌더링 단계에서 탈락(쿠폰 유효기간 밖): 종단 SKIPPED(COUPON_INVALID), 재시도하지 않는다 */

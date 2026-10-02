@@ -158,7 +158,8 @@ public class CampaignService {
 		}
 	}
 
-	private boolean containsCouponUrl(String text) {
+	/** 워크플로우 SEND 노드 검증(workflow 패키지)에서도 같은 치환자 판정이 필요해 공개한다 */
+	public static boolean containsCouponUrl(String text) {
 		return text != null && COUPON_URL_PLACEHOLDER.matcher(text).find();
 	}
 
@@ -229,13 +230,29 @@ public class CampaignService {
 			throw new BusinessException(CampaignErrorCode.CAMPAIGN_INVALID_STATUS,
 				"DRAFT·SCHEDULED 상태의 캠페인만 시작할 수 있습니다.", null);
 		}
-		// 선점: 같은 캠페인을 동시에 시작하는 요청 중 한 명만 통과한다(스케줄러 + 사용자 '지금 시작'). 이후 예약 취소·수정이 끼면
-		// updated_at 이 바뀌어 마지막 전환이 막힌다 — 적재(수 초~분) 동안 락을 쥐지 않고도 옛 데이터로 ACTIVE 가 되는 걸 막는다(이슈 #52)
-		OffsetDateTime claimedAt = campaignMapper.claimStart(campaignId, campaign.getUpdatedAt());
+		// 선점(start_claimed_at): 같은 캠페인을 동시에 시작하는 요청 중 한 명만 통과한다(스케줄러 + 사용자 '지금 시작'). updated_at 은
+		// 건드리지 않는다. 선점 뒤 예약 취소·수정이 끼면 updated_at 이 바뀌어 마지막 전환이 막힌다 — 적재(수 초~분) 동안 락을
+		// 쥐지 않고도 옛 데이터로 ACTIVE 가 되는 걸 막는다(이슈 #52)
+		OffsetDateTime readAt = campaign.getUpdatedAt();
+		OffsetDateTime claimedAt = campaignMapper.claimStart(campaignId, readAt);
 		if (claimedAt == null) {
 			throw new BusinessException(CampaignErrorCode.CAMPAIGN_INVALID_STATUS,
 				"다른 요청이 이 캠페인을 시작·수정하고 있습니다. 잠시 뒤 다시 시도하세요.", null);
 		}
+		try {
+			startClaimed(campaign, readAt, claimedAt);
+		} catch (RuntimeException e) {
+			// 실패하면 내 선점을 푼다 — 안 풀면 10분 동안 아무도 이 캠페인을 시작하지 못한다
+			campaignMapper.releaseStart(campaignId, claimedAt);
+			throw e;
+		}
+		campaign.setStatus(CampaignStatus.ACTIVE);
+		return campaign;
+	}
+
+	/** 선점한 요청만 부른다: 시간·쿠폰 검사 → 고아 정리 → 적재 → 최종 전환 */
+	private void startClaimed(Campaign campaign, OffsetDateTime readAt, OffsetDateTime claimedAt) {
+		long campaignId = campaign.getCampaignId();
 		OffsetDateTime now = OffsetDateTime.now(clock);
 		if (campaign.getType() == CampaignType.ONE_TIME) {
 			checkSendWindowAndCoupon(campaign, now);
@@ -250,12 +267,10 @@ public class CampaignService {
 			List<Long> targetIds = segmentService.findTargetCustomers(campaign.getSegmentId());
 			sendQueueService.enqueueOneTime(campaignId, targetIds, template.getChannel(), SendKind.CAMPAIGN);
 		}
-		if (campaignMapper.start(campaignId, claimedAt) == 0) {
+		if (campaignMapper.start(campaignId, readAt, claimedAt) == 0) {
 			throw new BusinessException(CampaignErrorCode.CAMPAIGN_INVALID_STATUS,
 				"시작하는 동안 캠페인이 수정되거나 예약이 취소되어 시작하지 않았습니다. 내용을 확인하고 다시 시작하세요.", null);
 		}
-		campaign.setStatus(CampaignStatus.ACTIVE);
-		return campaign;
 	}
 
 	private Template requireTemplate(Long templateId) {

@@ -72,13 +72,13 @@ class CampaignStartOrderTest {
 	void 적재가_ACTIVE_전환보다_먼저다() {
 		campaign(CampaignStatus.DRAFT);
 		template();
-		when(campaignMapper.start(1L, CLAIMED_AT)).thenReturn(1);
+		when(campaignMapper.start(1L, READ_AT, CLAIMED_AT)).thenReturn(1);
 
 		service.start(1L);
 
 		InOrder order = inOrder(sendQueueService, campaignMapper);
 		order.verify(sendQueueService).enqueueOneTime(1L, List.of(1L, 2L), Channel.EMAIL, SendKind.CAMPAIGN);
-		order.verify(campaignMapper).start(1L, CLAIMED_AT);
+		order.verify(campaignMapper).start(1L, READ_AT, CLAIMED_AT);
 	}
 
 	@Test
@@ -90,7 +90,7 @@ class CampaignStartOrderTest {
 
 		assertThatThrownBy(() -> service.start(1L)).isInstanceOf(IllegalStateException.class);
 
-		verify(campaignMapper, never()).start(anyLong(), any());
+		verify(campaignMapper, never()).start(anyLong(), any(), any());
 	}
 
 	@Test
@@ -106,14 +106,14 @@ class CampaignStartOrderTest {
 	void 시작할_때_적재_전에_남은_PENDING부터_지운다() {
 		campaign(CampaignStatus.DRAFT);
 		template();
-		when(campaignMapper.start(1L, CLAIMED_AT)).thenReturn(1);
+		when(campaignMapper.start(1L, READ_AT, CLAIMED_AT)).thenReturn(1);
 
 		service.start(1L);
 
 		InOrder order = inOrder(sendLogMapper, sendQueueService, campaignMapper);
 		order.verify(sendLogMapper).deleteUnstartedCampaignPending(1L);
 		order.verify(sendQueueService).enqueueOneTime(1L, List.of(1L, 2L), Channel.EMAIL, SendKind.CAMPAIGN);
-		order.verify(campaignMapper).start(1L, CLAIMED_AT);
+		order.verify(campaignMapper).start(1L, READ_AT, CLAIMED_AT);
 	}
 
 	@Test
@@ -135,7 +135,7 @@ class CampaignStartOrderTest {
 	void 선점이_가장_먼저다() {
 		campaign(CampaignStatus.DRAFT);
 		template();
-		when(campaignMapper.start(1L, CLAIMED_AT)).thenReturn(1);
+		when(campaignMapper.start(1L, READ_AT, CLAIMED_AT)).thenReturn(1);
 
 		service.start(1L);
 
@@ -143,7 +143,7 @@ class CampaignStartOrderTest {
 		order.verify(campaignMapper).claimStart(1L, READ_AT);
 		order.verify(sendLogMapper).deleteUnstartedCampaignPending(1L);
 		order.verify(sendQueueService).enqueueOneTime(1L, List.of(1L, 2L), Channel.EMAIL, SendKind.CAMPAIGN);
-		order.verify(campaignMapper).start(1L, CLAIMED_AT);
+		order.verify(campaignMapper).start(1L, READ_AT, CLAIMED_AT);
 	}
 
 	@Test
@@ -157,14 +157,14 @@ class CampaignStartOrderTest {
 
 		verify(sendLogMapper, never()).deleteUnstartedCampaignPending(anyLong());
 		verify(sendQueueService, never()).enqueueOneTime(anyLong(), anyList(), any(), any());
-		verify(campaignMapper, never()).start(anyLong(), any());
+		verify(campaignMapper, never()).start(anyLong(), any(), any());
 	}
 
 	@Test
 	void 적재_중_예약_취소나_수정이_끼면_최종_전환이_막혀_409다() {
 		campaign(CampaignStatus.SCHEDULED);
 		template();
-		when(campaignMapper.start(1L, CLAIMED_AT)).thenReturn(0); // updated_at 이 바뀌어 0행
+		when(campaignMapper.start(1L, READ_AT, CLAIMED_AT)).thenReturn(0); // updated_at 이 바뀌어 0행
 
 		assertThatThrownBy(() -> service.start(1L)).isInstanceOfSatisfying(BusinessException.class,
 			e -> assertThat(e.getErrorCode()).isEqualTo(CampaignErrorCode.CAMPAIGN_INVALID_STATUS));
@@ -188,5 +188,39 @@ class CampaignStartOrderTest {
 		assertThatThrownBy(() -> service.cancelSchedule(1L)).isInstanceOf(BusinessException.class);
 
 		verify(sendLogMapper, never()).deleteUnstartedCampaignPending(anyLong());
+	}
+
+	@Test
+	void 적재가_실패하면_내_선점을_푼다() {
+		campaign(CampaignStatus.DRAFT);
+		template();
+		when(sendQueueService.enqueueOneTime(anyLong(), anyList(), any(), any()))
+			.thenThrow(new IllegalStateException("DB 오류"));
+
+		assertThatThrownBy(() -> service.start(1L)).isInstanceOf(IllegalStateException.class);
+
+		verify(campaignMapper).releaseStart(1L, CLAIMED_AT);
+	}
+
+	@Test
+	void 최종_전환이_막혀도_내_선점을_푼다() {
+		campaign(CampaignStatus.SCHEDULED);
+		template();
+		when(campaignMapper.start(1L, READ_AT, CLAIMED_AT)).thenReturn(0);
+
+		assertThatThrownBy(() -> service.start(1L)).isInstanceOf(BusinessException.class);
+
+		verify(campaignMapper).releaseStart(1L, CLAIMED_AT);
+	}
+
+	@Test
+	void 선점에_실패한_요청은_남의_선점을_풀지_않는다() {
+		campaign(CampaignStatus.DRAFT);
+		template();
+		when(campaignMapper.claimStart(1L, READ_AT)).thenReturn(null);
+
+		assertThatThrownBy(() -> service.start(1L)).isInstanceOf(BusinessException.class);
+
+		verify(campaignMapper, never()).releaseStart(anyLong(), any());
 	}
 }
