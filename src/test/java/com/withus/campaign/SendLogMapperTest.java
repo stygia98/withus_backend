@@ -233,6 +233,7 @@ class SendLogMapperTest {
 			"SELECT send_log_id FROM send_log WHERE campaign_id = ? AND customer_id = ?",
 			Long.class, campaignId, customerId);
 
+		jdbcTemplate.update("UPDATE send_log SET status = 'SENDING' WHERE send_log_id = ?", sendLogId); // 실제 흐름: 선점 뒤에만 결과를 기록한다
 		sendLogMapper.recordSent(sendLogId, "ses-message-id-1");
 
 		SendLog found = sendLogMapper.findByProviderMessageId("ses-message-id-1");
@@ -251,6 +252,7 @@ class SendLogMapperTest {
 			"SELECT send_log_id FROM send_log WHERE campaign_id = ? AND customer_id = ?",
 			Long.class, campaignId, customerId);
 
+		jdbcTemplate.update("UPDATE send_log SET status = 'SENDING' WHERE send_log_id = ?", sendLogId); // 실제 흐름: 선점 뒤에만 결과를 기록한다
 		sendLogMapper.recordFailed(sendLogId, "PERMANENT");
 
 		String status = jdbcTemplate.queryForObject(
@@ -269,6 +271,7 @@ class SendLogMapperTest {
 		long sendLogId = jdbcTemplate.queryForObject(
 			"SELECT send_log_id FROM send_log WHERE campaign_id = ? AND customer_id = ?",
 			Long.class, campaignId, customerId);
+		jdbcTemplate.update("UPDATE send_log SET status = 'SENDING' WHERE send_log_id = ?", sendLogId); // 실제 흐름: 선점 뒤에만 결과를 기록한다
 		sendLogMapper.recordSent(sendLogId, "ses-message-id-bounce");
 
 		sendLogMapper.markBounced("ses-message-id-bounce");
