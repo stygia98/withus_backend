@@ -208,6 +208,23 @@ class SendLogMapperTest {
 	}
 
 	@Test
+	void ACTIVE_전에_미리_적재된_DRAFT_SCHEDULED_캠페인_건은_선점_대상에서_제외된다() {
+		long segmentId = newSegment();
+		long draftCampaignId = newOneTimeCampaign(segmentId);
+		jdbcTemplate.update("UPDATE campaign SET status = 'DRAFT' WHERE campaign_id = ?", draftCampaignId);
+		sendLogMapper.insertOneTimeBatch(List.of(oneTimeLog(draftCampaignId, customerId)));
+		long scheduledCampaignId = newOneTimeCampaign(segmentId);
+		jdbcTemplate.update("UPDATE campaign SET status = 'SCHEDULED', scheduled_at = now() + interval '1 day' "
+			+ "WHERE campaign_id = ?", scheduledCampaignId);
+		sendLogMapper.insertOneTimeBatch(List.of(oneTimeLog(scheduledCampaignId, newCustomer())));
+
+		List<SendLog> claimed = sendLogMapper.claimBatch();
+
+		assertThat(claimed).extracting(SendLog::getCampaignId)
+			.doesNotContain(draftCampaignId, scheduledCampaignId);
+	}
+
+	@Test
 	void 발송_성공을_기록하면_provider_message_id로_조회된다() {
 		long segmentId = newSegment();
 		long campaignId = newOneTimeCampaign(segmentId);
@@ -242,5 +259,42 @@ class SendLogMapperTest {
 			"SELECT error_message FROM send_log WHERE send_log_id = ?", String.class, sendLogId);
 		assertThat(status).isEqualTo("FAILED");
 		assertThat(errorMessage).isEqualTo("PERMANENT");
+	}
+
+	@Test
+	void 반송을_기록하면_BOUNCED로_바뀐다() {
+		long segmentId = newSegment();
+		long campaignId = newOneTimeCampaign(segmentId);
+		sendLogMapper.insertOneTimeBatch(List.of(oneTimeLog(campaignId, customerId)));
+		long sendLogId = jdbcTemplate.queryForObject(
+			"SELECT send_log_id FROM send_log WHERE campaign_id = ? AND customer_id = ?",
+			Long.class, campaignId, customerId);
+		sendLogMapper.recordSent(sendLogId, "ses-message-id-bounce");
+
+		sendLogMapper.markBounced("ses-message-id-bounce");
+
+		String status = jdbcTemplate.queryForObject(
+			"SELECT status FROM send_log WHERE send_log_id = ?", String.class, sendLogId);
+		assertThat(status).isEqualTo("BOUNCED");
+	}
+
+	@Test
+	void SENT이_아닌_건은_반송_기록이_먹지_않는다() {
+		long segmentId = newSegment();
+		long campaignId = newOneTimeCampaign(segmentId);
+		sendLogMapper.insertOneTimeBatch(List.of(oneTimeLog(campaignId, customerId)));
+		long sendLogId = jdbcTemplate.queryForObject(
+			"SELECT send_log_id FROM send_log WHERE campaign_id = ? AND customer_id = ?",
+			Long.class, campaignId, customerId);
+		// provider_message_id 는 정상적으로는 recordSent 때만 생기지만, 상태 전이(SENT→BOUNCED)가 지켜지는지
+		// 직접 확인하려고 PENDING 상태에 강제로 넣어본다
+		jdbcTemplate.update("UPDATE send_log SET provider_message_id = ? WHERE send_log_id = ?",
+			"ses-message-id-pending", sendLogId);
+
+		sendLogMapper.markBounced("ses-message-id-pending");
+
+		String status = jdbcTemplate.queryForObject(
+			"SELECT status FROM send_log WHERE send_log_id = ?", String.class, sendLogId);
+		assertThat(status).isEqualTo("PENDING");
 	}
 }

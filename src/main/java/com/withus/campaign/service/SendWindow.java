@@ -34,6 +34,7 @@ public class SendWindow {
 
 	/** 판정만 떼어낸 순수 메서드 — 경계값 단위 테스트용 */
 	public Optional<OffsetDateTime> holdUntil(OffsetDateTime now) {
+		now = inWindowZone(now);
 		LocalTime time = now.toLocalTime();
 		if (!time.isBefore(start) && !time.isAfter(end)) {
 			return Optional.empty();
@@ -54,6 +55,7 @@ public class SendWindow {
 	 * (PRD 8.4 "20:50 을 넘겨 끝날 예약은 막는다").
 	 */
 	public BulkWindowResult evaluateBulk(OffsetDateTime startAt, long durationSeconds) {
+		startAt = inWindowZone(startAt);
 		LocalTime startTime = startAt.toLocalTime();
 		if (startTime.isAfter(end)) {
 			return new BulkWindowResult(startAt.plusSeconds(durationSeconds), false, nextDayStart(startAt));
@@ -67,6 +69,14 @@ public class SendWindow {
 		boolean allowed = sameDay && withinEnd;
 		OffsetDateTime nextAvailableAt = allowed ? null : nextDayStart(effectiveStart);
 		return new BulkWindowResult(expectedEndAt, allowed, nextAvailableAt);
+	}
+
+	/**
+	 * toLocalTime() 은 값에 붙은 오프셋의 시각을 그대로 돌려주므로, 요청이 Z·-05:00 으로 와도 서울 시각으로 바꾼 뒤 판정한다
+	 * (PR #31 리뷰 🔴2). 같은 순간이면 어느 오프셋으로 와도 같은 결과여야 한다
+	 */
+	private OffsetDateTime inWindowZone(OffsetDateTime time) {
+		return time.atZoneSameInstant(clock.getZone()).toOffsetDateTime();
 	}
 
 	private OffsetDateTime nextDayStart(OffsetDateTime from) {

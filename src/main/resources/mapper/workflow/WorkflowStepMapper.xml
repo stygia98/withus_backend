@@ -34,4 +34,7 @@
 	<delete id="deleteByCampaignId">
 		DELETE FROM workflow_step WHERE campaign_id = #{campaignId}
 	</delete>
+	<select id="lockCampaignStatus" resultType="string">
+		SELECT status FROM campaign WHERE campaign_id = #{campaignId} FOR UPDATE
+	</select>
 </mapper>

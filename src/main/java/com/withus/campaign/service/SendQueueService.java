@@ -3,6 +3,7 @@ package com.withus.campaign.service;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
@@ -67,6 +68,11 @@ public class SendQueueService {
 		};
 	}
 
+	/** SES 반송 웹훅용 — 해당 건을 BOUNCED 로 기록한다 (팀원1, send_log 는 campaign 도메인 소유라 이 서비스를 통해 쓴다) */
+	public void markBounced(String providerMessageId) {
+		sendLogMapper.markBounced(providerMessageId);
+	}
+
 	/** 워크플로우 SEND 노드 적재. 같은 (instanceId, stepId) 로 다시 호출해도 멱등하다 */
 	public int enqueueWorkflowStep(long campaignId, long instanceId, long stepId, long customerId, Channel channel) {
 		List<SendLog> logs = buildLogs(campaignId, instanceId, stepId, List.of(customerId), channel,
@@ -82,8 +88,12 @@ public class SendQueueService {
 
 	private List<SendLog> buildLogs(Long campaignId, Long instanceId, Long stepId, List<Long> customerIds,
 			Channel channel, SendKind kind, short priority) {
+		// SMS 는 휴대폰이 없는 고객이 recipient=null 로 조회된다. Collectors.toMap 은 null 값에서 NPE 라 먼저 거른다(이슈 #43)
 		Map<Long, String> recipients = sendLogMapper.findRecipients(customerIds, channel).stream()
+			.filter(r -> r.getRecipient() != null)
 			.collect(Collectors.toMap(CustomerRecipient::getCustomerId, CustomerRecipient::getRecipient));
+		// 수신동의·suppression·삭제 확인을 청크당 한 번에 한다(고객마다 isSendable 을 부르면 N+1, #21 PL 결정 C)
+		Set<Long> sendableIds = consentService.filterSendable(new ArrayList<>(recipients.keySet()), channel);
 
 		List<SendLog> logs = new ArrayList<>();
 		for (Long customerId : customerIds) {
@@ -91,7 +101,7 @@ public class SendQueueService {
 			if (recipient == null) {
 				continue; // 삭제됐거나 해당 채널 연락처가 없다 — 적재하지 않는다
 			}
-			boolean sendable = consentService.isSendable(customerId, channel);
+			boolean sendable = sendableIds.contains(customerId);
 			logs.add(SendLog.builder()
 				.campaignId(campaignId)
 				.instanceId(instanceId)

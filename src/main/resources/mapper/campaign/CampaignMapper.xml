@@ -46,8 +46,12 @@
 		UPDATE campaign
 		SET name = #{name}, segment_id = #{segmentId}, template_id = #{templateId}, coupon_id = #{couponId},
 			scheduled_at = #{scheduledAt}, trigger_type = #{triggerType}, updated_at = now()
-		WHERE campaign_id = #{campaignId}
+		WHERE campaign_id = #{campaignId} AND status = 'DRAFT'
 	</update>
+
+	<select id="existsSegment" resultType="boolean">
+		SELECT EXISTS (SELECT 1 FROM segment WHERE segment_id = #{segmentId})
+	</select>
 
 	<update id="updateStatus">
 		UPDATE campaign SET status = #{newStatus}, updated_at = now()

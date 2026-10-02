@@ -31,4 +31,7 @@ public interface WorkflowStepMapper {
 
 	/** 캠페인 구조 저장(PUT)은 기존 구조를 통째로 지우고 다시 쓴다 */
 	void deleteByCampaignId(@Param("campaignId") long campaignId);
+
+	/** 캠페인 행을 FOR UPDATE 로 잠그고 상태를 돌려준다(campaign 테이블 SELECT). 구조 저장이 시작 요청·다른 저장과 겹치지 않게 한다 */
+	String lockCampaignStatus(@Param("campaignId") long campaignId);
 }

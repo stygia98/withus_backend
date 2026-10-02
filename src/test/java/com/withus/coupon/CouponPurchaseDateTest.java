@@ -2,7 +2,6 @@ package com.withus.coupon;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -23,10 +22,12 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.withus.auth.domain.Role;
 import com.withus.auth.security.AuthMember;
+import com.withus.common.TestCsrf;
 
 /**
  * 구매 등록(팀원1) → CouponService.markUsed(팀원3) 연결: 쿠폰 기간은 구매일 기준 (PRD F-10 ①, PL 리뷰 #16 재현 케이스).
@@ -47,8 +48,12 @@ class CouponPurchaseDateTest {
 	long memberId;
 	long customerId;
 
+	/** 실제 /auth/csrf 쿠키 방식 CSRF (common.TestCsrf) */
+	RequestPostProcessor csrf;
+
 	@BeforeEach
-	void setUp() {
+	void setUp() throws Exception {
+		csrf = TestCsrf.issue(mvc);
 		memberId = jdbc.queryForObject("INSERT INTO member (email, password, name, role) VALUES (?, 'x', '관리자', 'MANAGER') "
 			+ "RETURNING member_id", Long.class, "cpd-" + UUID.randomUUID() + "@withus.local");
 		customerId = jdbc.queryForObject("""
@@ -71,7 +76,7 @@ class CouponPurchaseDateTest {
 		return mvc.perform(post("/api/v1/customers/" + customerId + "/purchases")
 			.with(authentication(new UsernamePasswordAuthenticationToken(new AuthMember(memberId, Role.MANAGER), null,
 				List.of(new SimpleGrantedAuthority("ROLE_MANAGER")))))
-			.with(csrf())
+			.with(csrf)
 			.contentType(MediaType.APPLICATION_JSON)
 			.content("{\"amount\":45000,\"couponIssueId\":%d,\"purchasedAt\":\"%sT14:10:00+09:00\"}"
 				.formatted(issueId, purchaseDate)));

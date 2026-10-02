@@ -2,6 +2,7 @@ package com.withus.customer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -24,12 +25,15 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.withus.campaign.service.SendQueueService;
 import com.withus.customer.service.SnsHttpClient;
 
 import tools.jackson.databind.ObjectMapper;
@@ -56,6 +60,8 @@ class SesWebhookTest {
 	ObjectMapper objectMapper;
 	@MockitoBean
 	SnsHttpClient sns;
+	@MockitoSpyBean
+	SendQueueService sendQueue;
 
 	@BeforeAll
 	static void keyPair() throws Exception {
@@ -74,11 +80,14 @@ class SesWebhookTest {
 		String email = email();
 		long id = customer(email);
 		String unknown = email();
+		String messageId = sentLog(id, email, "SENT");
 
 		send(notification("Bounce", """
+			"mail":{"messageId":"%s"},
 			"bounce":{"bounceType":"Permanent","bouncedRecipients":[{"emailAddress":"%s"},{"emailAddress":"%s"}]}
-			""".formatted(email.toUpperCase(), unknown), "1"));
+			""".formatted(messageId, email.toUpperCase(), unknown), "1"));
 
+		assertThat(sendStatus(messageId)).isEqualTo("BOUNCED");
 		assertThat(consent(id)).isEqualTo("N");
 		assertThat(reason(email)).isEqualTo("BOUNCE");
 		// 고객이 없는 주소도 목록에 남아 이후 등록·업로드 때 걸러진다
@@ -88,44 +97,103 @@ class SesWebhookTest {
 	}
 
 	@Test
-	void 스팸신고는_COMPLAINT_로_거부한다_서명버전2() throws Exception {
+	void 스팸신고는_COMPLAINT_로_거부하고_발송_건은_SENT_로_둔다_서명버전2() throws Exception {
 		String email = email();
 		long id = customer(email);
+		String messageId = sentLog(id, email, "SENT");
 
 		send(notification("Complaint", """
+			"mail":{"messageId":"%s"},
 			"complaint":{"complainedRecipients":[{"emailAddress":"%s"}]}
-			""".formatted(email), "2"));
+			""".formatted(messageId, email), "2"));
 
+		// BOUNCED 로 바꾸면 이미 집계된 오픈·클릭·전환이 사후에 빠진다 (PRD 8.2)
+		assertThat(sendStatus(messageId)).isEqualTo("SENT");
 		assertThat(consent(id)).isEqualTo("N");
 		assertThat(reason(email)).isEqualTo("COMPLAINT");
+	}
+
+	@Test
+	void 같은_반송이_다시_와도_결과가_같다() throws Exception {
+		String email = email();
+		long id = customer(email);
+		String messageId = sentLog(id, email, "SENT");
+		Map<String, String> bounce = permanentBounce(messageId, email);
+
+		send(bounce);
+		send(bounce); // SNS 는 at-least-once
+
+		assertThat(sendStatus(messageId)).isEqualTo("BOUNCED");
+		assertThat(jdbc.queryForObject("SELECT count(*) FROM suppression WHERE value = ?", Integer.class, email))
+			.isOne();
+		assertThat(jdbc.queryForObject("SELECT count(*) FROM consent_history WHERE customer_id = ?", Integer.class,
+			id)).isOne();
+	}
+
+	@Test
+	void messageId_없음_발송_건_없음_SENDING_건이어도_suppression_은_추가한다() throws Exception {
+		String noId = email();
+		send(notification("Bounce", """
+			"bounce":{"bounceType":"Permanent","bouncedRecipients":[{"emailAddress":"%s"}]}
+			""".formatted(noId), "1"));
+
+		String noLog = email();
+		send(permanentBounce("ses-" + UUID.randomUUID(), noLog));
+
+		// 발송 결과 기록보다 반송 알림이 먼저 온 경우: SENT 가 아니면 바꾸지 않는다
+		String early = email();
+		String sendingId = sentLog(customer(early), early, "SENDING");
+		send(permanentBounce(sendingId, early));
+
+		assertThat(reason(noId)).isEqualTo("BOUNCE");
+		assertThat(reason(noLog)).isEqualTo("BOUNCE");
+		assertThat(reason(early)).isEqualTo("BOUNCE");
+		assertThat(sendStatus(sendingId)).isEqualTo("SENDING");
+	}
+
+	@Test
+	void send_log_반영이_실패해도_suppression_은_남고_200() throws Exception {
+		String email = email();
+		long id = customer(email);
+		String messageId = sentLog(id, email, "SENT");
+		doThrow(new DataAccessResourceFailureException("DB 순단")).when(sendQueue).markBounced(messageId);
+
+		send(permanentBounce(messageId, email));
+
+		assertThat(reason(email)).isEqualTo("BOUNCE");
+		assertThat(consent(id)).isEqualTo("N");
+		assertThat(sendStatus(messageId)).isEqualTo("SENT");
 	}
 
 	@Test
 	void 일시_반송_위조_서명_다른_토픽_SNS_가_아닌_인증서는_무시하고_200() throws Exception {
 		String email = email();
 		long id = customer(email);
+		String messageId = sentLog(id, email, "SENT");
 		String bounce = """
-			"bounce":{"bounceType":"%s","bouncedRecipients":[{"emailAddress":"%s"}]}
-			""";
+			"mail":{"messageId":"%s"},
+			"bounce":{"bounceType":"%%s","bouncedRecipients":[{"emailAddress":"%s"}]}
+			""".formatted(messageId, email);
 
-		send(notification("Bounce", bounce.formatted("Transient", email), "1"));
+		send(notification("Bounce", bounce.formatted("Transient"), "1"));
 
-		Map<String, String> forged = notification("Bounce", bounce.formatted("Permanent", email), "1");
+		Map<String, String> forged = notification("Bounce", bounce.formatted("Permanent"), "1");
 		forged.put("Message", forged.get("Message").replace("Permanent", "Permanent "));
 		send(forged);
 
 		Map<String, String> otherTopic = new TreeMap<>(Map.of("TopicArn", TOPIC + "-other"));
-		otherTopic.putAll(withoutSignature(notification("Bounce", bounce.formatted("Permanent", email), "1"),
+		otherTopic.putAll(withoutSignature(notification("Bounce", bounce.formatted("Permanent"), "1"),
 			"TopicArn"));
 		send(sign(otherTopic, "1"));
 
-		Map<String, String> evilCert = notification("Bounce", bounce.formatted("Permanent", email), "1");
+		Map<String, String> evilCert = notification("Bounce", bounce.formatted("Permanent"), "1");
 		evilCert.put("SigningCertURL", "https://sns.ap-northeast-2.amazonaws.com.evil.example/cert.pem");
 		send(evilCert);
 
 		mvc.perform(post("/api/webhooks/ses").contentType(MediaType.TEXT_PLAIN).content("not json"))
 			.andExpect(status().isOk());
 
+		assertThat(sendStatus(messageId)).isEqualTo("SENT");
 		assertThat(consent(id)).isEqualTo("Y");
 		assertThat(jdbc.queryForObject("SELECT count(*) FROM suppression WHERE value = ?", Integer.class, email))
 			.isZero();
@@ -151,6 +219,13 @@ class SesWebhookTest {
 		m.put("Message", "{\"notificationType\":\"%s\",%s}".formatted(type, detail.strip()));
 		m.put("Timestamp", "2026-10-01T06:00:00.000Z");
 		return sign(m, version);
+	}
+
+	private Map<String, String> permanentBounce(String messageId, String email) {
+		return notification("Bounce", """
+			"mail":{"messageId":"%s"},
+			"bounce":{"bounceType":"Permanent","bouncedRecipients":[{"emailAddress":"%s"}]}
+			""".formatted(messageId, email), "1");
 	}
 
 	private Map<String, String> subscription(String subscribeUrl) {
@@ -197,6 +272,18 @@ class SesWebhookTest {
 	private long customer(String email) {
 		return jdbc.queryForObject("INSERT INTO customer (email, joined_at, source, email_consent_yn, email_consent_at) "
 			+ "VALUES (?, CURRENT_DATE, 'MANUAL', 'Y', now()) RETURNING customer_id", Long.class, email);
+	}
+
+	/** SES 로 나간 발송 건 (send_log 는 팀원2 소유지만 테스트 준비 데이터라 직접 넣는다). provider_message_id 를 돌려준다 */
+	private String sentLog(long customerId, String email, String status) {
+		String messageId = "ses-" + UUID.randomUUID();
+		jdbc.update("INSERT INTO send_log (customer_id, recipient, channel, status, kind, priority, provider_message_id, "
+			+ "sent_at) VALUES (?, ?, 'EMAIL', ?, 'NOTICE', 2, ?, now())", customerId, email, status, messageId);
+		return messageId;
+	}
+
+	private String sendStatus(String messageId) {
+		return jdbc.queryForObject("SELECT status FROM send_log WHERE provider_message_id = ?", String.class, messageId);
 	}
 
 	private String consent(long customerId) {

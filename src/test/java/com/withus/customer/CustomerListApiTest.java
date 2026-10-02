@@ -1,7 +1,6 @@
 package com.withus.customer;
 
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -27,6 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.jayway.jsonpath.JsonPath;
 import com.withus.auth.domain.Role;
 import com.withus.auth.security.AuthMember;
+import com.withus.common.TestCsrf;
 
 /** 고객 목록 API (API_SPEC 3장 GET /customers). 테스트마다 고유 태그로 자기 데이터만 검색한다 */
 @SpringBootTest
@@ -119,7 +119,7 @@ class CustomerListApiTest {
 	}
 
 	private ResultActions call(MockHttpServletRequestBuilder request) throws Exception {
-		return mvc.perform(request.contentType(MediaType.APPLICATION_JSON).with(auth(Role.MANAGER)).with(csrf()));
+		return mvc.perform(request.contentType(MediaType.APPLICATION_JSON).with(auth(Role.MANAGER)).with(TestCsrf.issue(mvc)));
 	}
 
 	private static org.springframework.test.web.servlet.request.RequestPostProcessor auth(Role role) {

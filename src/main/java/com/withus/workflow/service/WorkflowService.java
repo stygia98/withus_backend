@@ -82,7 +82,9 @@ public class WorkflowService {
 	public WorkflowResponse save(long campaignId, WorkflowSaveRequest request) {
 		Campaign campaign = campaignService.getOrThrow(campaignId);
 		requireWorkflow(campaign);
-		if (campaign.getStatus() != CampaignStatus.DRAFT) {
+		// 캠페인 행을 잠가서 확인한다(PR #34 리뷰 🔴2): 동시에 PUT 두 개가 오면 하나씩 처리되고, 시작 요청이 먼저 ACTIVE 로
+		// 커밋했다면 여기서 409 가 된다. 잠그지 않으면 실행 중인 캠페인의 단계를 지우려다 FK 위반(500)이 날 수 있다
+		if (!"DRAFT".equals(workflowStepMapper.lockCampaignStatus(campaignId))) {
 			throw new BusinessException(CampaignErrorCode.CAMPAIGN_INVALID_STATUS, "DRAFT 상태의 워크플로우만 저장할 수 있습니다.",
 				null);
 		}
@@ -148,22 +150,34 @@ public class WorkflowService {
 
 		Set<Long> templateIds = nodes.stream().map(WorkflowNode::templateId).filter(Objects::nonNull)
 			.collect(Collectors.toSet());
-		Map<Long, Boolean> templateUsesCouponUrl = templateIds.stream()
-			.collect(Collectors.toMap(id -> id, this::usesCouponUrl));
+		Map<Long, Boolean> templateUsesCouponUrl = new HashMap<>();
+		List<Long> missingTemplates = new java.util.ArrayList<>();
+		for (Long id : templateIds) {
+			Template template = templateMapper.findById(id);
+			if (template == null) {
+				missingTemplates.add(id);
+			} else {
+				templateUsesCouponUrl.put(id, usesCouponUrl(template));
+			}
+		}
+		if (!missingTemplates.isEmpty()) {
+			throw new BusinessException(WorkflowErrorCode.WORKFLOW_INVALID_STRUCTURE,
+				WorkflowErrorCode.WORKFLOW_INVALID_STRUCTURE.message(),
+				List.of("존재하지 않는 템플릿: " + missingTemplates));
+		}
 
 		Set<Long> couponIds = nodes.stream().map(WorkflowNode::couponId).filter(Objects::nonNull)
 			.collect(Collectors.toSet());
+		// 없는 쿠폰은 null 이라 false(쓸 수 없음)로 둔다 — 검증기가 "없거나 기간 밖"으로 보고한다
 		Map<Long, Boolean> couponValid = couponIds.stream()
-			.collect(Collectors.toMap(id -> id, sendLogMapper::isCouponValid));
+			.collect(Collectors.toMap(id -> id, id -> Boolean.TRUE.equals(sendLogMapper.isCouponValid(id))));
 
 		return workflowValidator.validate(nodes, templateUsesCouponUrl, couponValid);
 	}
 
-	private boolean usesCouponUrl(long templateId) {
-		Template template = templateMapper.findById(templateId);
-		return template != null
-			&& (CampaignService.containsCouponUrl(template.getSubject())
-				|| CampaignService.containsCouponUrl(template.getBody()));
+	private boolean usesCouponUrl(Template template) {
+		return CampaignService.containsCouponUrl(template.getSubject())
+			|| CampaignService.containsCouponUrl(template.getBody());
 	}
 
 	/** WorkflowValidator 가 이미 순환·미연결을 걸러냈다는 전제로, TRIGGER부터 CONDITION 중첩 수를 센다 */

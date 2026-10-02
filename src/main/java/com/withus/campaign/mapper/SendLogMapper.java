@@ -34,7 +34,8 @@ public interface SendLogMapper {
 
 	/**
 	 * 선점: PENDING 중 priority·send_log_id 순으로 최대 50건을 SENDING 으로 바꾸고 그 행을 돌려준다.
-	 * PAUSED 캠페인 건은 선점 대상에서 제외한다(발송 큐 Plan 15장 A1 — 안 하면 계속 선점·반환을 반복해 다른 캠페인이 밀린다).
+	 * DRAFT·SCHEDULED·PAUSED 캠페인 건은 선점 대상에서 제외한다 — PAUSED 는 발송 큐 Plan 15장 A1(안 하면 계속 선점·반환을 반복해
+	 * 다른 캠페인이 밀린다), DRAFT·SCHEDULED 는 캠페인이 ACTIVE 가 되기 전에 미리 적재된 건이 먼저 나가지 않게 한다(PR #31 리뷰 🔴1).
 	 */
 	List<SendLog> claimBatch();
 
@@ -50,6 +51,9 @@ public interface SendLogMapper {
 
 	/** SES 웹훅용 — provider_message_id 로 send_log(고객 포함) 를 찾는다 (팀원1) */
 	SendLog findByProviderMessageId(@Param("providerMessageId") String providerMessageId);
+
+	/** SES 웹훅용 — 반송된 건을 BOUNCED 로 기록한다 (팀원1) */
+	void markBounced(@Param("providerMessageId") String providerMessageId);
 
 	/** 발송 직전 재확인(SendRecheck)용 — 선점 당시와 캠페인 상태가 바뀌었는지 다시 본다 */
 	String findCampaignStatus(@Param("campaignId") long campaignId);
@@ -89,7 +93,8 @@ public interface SendLogMapper {
 	Long findCouponIdByStepId(@Param("stepId") long stepId);
 
 	/** 오늘(Asia/Seoul)이 쿠폰 유효기간(valid_from~valid_to) 안인가 */
-	boolean isCouponValid(@Param("couponId") long couponId);
+	/** 쿠폰 행이 없으면 null — 호출하는 쪽은 Boolean.TRUE.equals 로 "없거나 기간 밖"을 함께 처리한다 */
+	Boolean isCouponValid(@Param("couponId") long couponId);
 
 	/** 재확인 이후 렌더링 단계에서 탈락(쿠폰 유효기간 밖): 종단 SKIPPED(COUPON_INVALID), 재시도하지 않는다 */
 	int recordSkippedCoupon(@Param("sendLogId") long sendLogId);

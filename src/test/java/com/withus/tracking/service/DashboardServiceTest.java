@@ -297,11 +297,12 @@ class DashboardServiceTest {
 			""", Long.class, name, "dash-" + UUID.randomUUID() + "@example.com");
 	}
 
-	private long send(Long campaign, Long customer, String kind, String status, OffsetDateTime sentAt, OffsetDateTime updatedAt) {
+	/** queuedAt: 적재 시각(created_at). 실패 건은 이 시각으로 기간을 판정한다. null 이면 now() */
+	private long send(Long campaign, Long customer, String kind, String status, OffsetDateTime sentAt, OffsetDateTime queuedAt) {
 		return jdbc.queryForObject("""
-			INSERT INTO send_log (campaign_id, customer_id, recipient, channel, kind, priority, status, sent_at, updated_at)
+			INSERT INTO send_log (campaign_id, customer_id, recipient, channel, kind, priority, status, sent_at, created_at)
 			VALUES (?, ?, 'dash@withus.local', 'EMAIL', ?, ?, ?, ?, COALESCE(?, now())) RETURNING send_log_id
-			""", Long.class, campaign, customer, kind, "TEST".equals(kind) ? 1 : 3, status, sentAt, updatedAt);
+			""", Long.class, campaign, customer, kind, "TEST".equals(kind) ? 1 : 3, status, sentAt, queuedAt);
 	}
 
 	private void event(long sendLogId, String type, String botYn) {
