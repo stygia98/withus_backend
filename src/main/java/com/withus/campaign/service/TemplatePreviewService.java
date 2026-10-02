@@ -1,6 +1,6 @@
 package com.withus.campaign.service;
 
-import java.nio.charset.Charset;
+import java.util.regex.Pattern;
 import java.util.List;
 import java.util.Map;
 
@@ -26,7 +26,12 @@ import com.withus.segment.service.SegmentService;
 public class TemplatePreviewService {
 
 	private static final int CHUNK_SIZE = 500;
-	private static final Charset SMS_CHARSET = Charset.forName("EUC-KR");
+	private static final int SMS_BYTE_LIMIT = 90;
+	// 기본값 문법 {{name|고객}} 이 하나도 없으면 고객별 조회 없이 기본값 인원이 0 이다
+	private static final Pattern HAS_DEFAULT = Pattern.compile("\\{\\{[^}]*\\|");
+	// STAFF 용 고정 샘플 — 실제 고객 값이 아니다
+	private static final CustomerPlaceholderSource FIXED_SAMPLE =
+		new CustomerPlaceholderSource("홍길동", "sample@example.com", "SEOUL", 100000L);
 
 	private final TemplateService templateService;
 	private final SendLogMapper sendLogMapper;
@@ -46,11 +51,16 @@ public class TemplatePreviewService {
 		this.trackingBaseUrl = trackingBaseUrl;
 	}
 
-	public TemplatePreviewResponse preview(long templateId, long sampleCustomerId, Long segmentId) {
+	/** @param canReadCustomer 고객 조회 권한(OWNER·MANAGER). false 면 sampleCustomerId 를 무시하고 고정 샘플 값을 쓴다 */
+	public TemplatePreviewResponse preview(long templateId, Long sampleCustomerId, Long segmentId,
+			boolean canReadCustomer) {
 		Template template = templateService.getOrThrow(templateId);
-		CustomerPlaceholderSource sample = sendLogMapper.findPlaceholderSource(sampleCustomerId);
-		if (sample == null) {
-			throw new BusinessException(CommonErrorCode.COMMON_NOT_FOUND, "미리보기용 고객을 찾을 수 없습니다.", null);
+		CustomerPlaceholderSource sample = FIXED_SAMPLE;
+		if (canReadCustomer && sampleCustomerId != null) {
+			sample = sendLogMapper.findPreviewSource(sampleCustomerId);
+			if (sample == null) {
+				throw new BusinessException(CommonErrorCode.COMMON_NOT_FOUND, "미리보기용 고객을 찾을 수 없습니다.", null);
+			}
 		}
 		Map<String, String> values = MessageComposer.placeholderValues(sample, exampleCouponUrl());
 		boolean isAd = template.isAd();
@@ -63,10 +73,19 @@ public class TemplatePreviewService {
 				isAd);
 			String html = adCopyInserter.insertEmailBody(placeholderRenderer.renderHtml(template.getBody(), values),
 				isAd, trackingBaseUrl + "/unsubscribe/example");
-			return new TemplatePreviewResponse(subject, html, null, counts);
+			return new TemplatePreviewResponse(subject, html, null, null, null, counts);
 		}
 		String text = adCopyInserter.insertSms(placeholderRenderer.render(template.getBody(), values), isAd);
-		return new TemplatePreviewResponse(null, text, text.getBytes(SMS_CHARSET).length, counts);
+		int bytes = smsBytes(text);
+		return new TemplatePreviewResponse(null, null, text, bytes, bytes > SMS_BYTE_LIMIT ? "LMS" : "SMS", counts);
+	}
+
+	/**
+	 * 통신사 기준 바이트: ASCII 1바이트, 그 외(한글·확장 한글·이모지 등) 2바이트. Java 의 EUC-KR 은 완성형 2,350자만 인코딩해
+	 * 확장 한글·이모지를 '?' 1바이트로 세어 LMS 과금을 놓치므로 쓰지 않는다
+	 */
+	public static int smsBytes(String text) {
+		return text.codePoints().map(cp -> cp < 128 ? 1 : 2).sum();
 	}
 
 	private String exampleCouponUrl() {
@@ -76,10 +95,17 @@ public class TemplatePreviewService {
 	/** 세그먼트 대상을 500건씩 조회해 기본값으로 나갈 인원을 센다 (제목·본문 중 하나라도 기본값을 쓰면 1명) */
 	private DefaultValueCount countDefaults(Template template, long segmentId) {
 		List<Long> targetIds = segmentService.findTargetCustomers(segmentId);
+		boolean hasDefault = HAS_DEFAULT.matcher(String.valueOf(template.getSubject())).find()
+			|| HAS_DEFAULT.matcher(String.valueOf(template.getBody())).find();
+		if (!hasDefault) {
+			return new DefaultValueCount(targetIds.size(), 0);
+		}
+		long total = 0;
 		long usingDefault = 0;
 		for (int from = 0; from < targetIds.size(); from += CHUNK_SIZE) {
 			List<Long> chunk = targetIds.subList(from, Math.min(from + CHUNK_SIZE, targetIds.size()));
 			for (CustomerPlaceholderSource source : sendLogMapper.findPlaceholderSources(chunk)) {
+				total++; // 삭제된 고객은 조회에서 빠지므로 실제로 센 행 수가 total 이다
 				Map<String, String> values = MessageComposer.placeholderValues(source, exampleCouponUrl());
 				if (placeholderRenderer.usesDefault(template.getSubject(), values)
 					|| placeholderRenderer.usesDefault(template.getBody(), values)) {
@@ -87,6 +113,6 @@ public class TemplatePreviewService {
 				}
 			}
 		}
-		return new DefaultValueCount(targetIds.size(), usingDefault);
+		return new DefaultValueCount(total, usingDefault);
 	}
 }

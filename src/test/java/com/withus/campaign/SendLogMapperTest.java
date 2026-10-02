@@ -280,4 +280,14 @@ class SendLogMapperTest {
 			"SELECT status FROM send_log WHERE send_log_id = ?", String.class, sendLogId);
 		assertThat(status).isEqualTo("PENDING");
 	}
+
+	@Test
+	void 미리보기_샘플_조회는_삭제된_고객을_제외한다() {
+		assertThat(sendLogMapper.findPreviewSource(customerId)).isNotNull();
+
+		jdbcTemplate.update("UPDATE customer SET deleted_yn = 'Y' WHERE customer_id = ?", customerId);
+
+		assertThat(sendLogMapper.findPreviewSource(customerId)).isNull();
+		assertThat(sendLogMapper.findPlaceholderSource(customerId)).isNotNull(); // 발송용 조회는 그대로
+	}
 }

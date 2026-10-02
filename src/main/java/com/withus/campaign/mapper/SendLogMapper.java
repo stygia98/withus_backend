@@ -81,6 +81,9 @@ public interface SendLogMapper {
 	/** 렌더링용 치환 값 원본(customer SELECT) — MessageComposer 가 PlaceholderRenderer 에 넘길 Map 을 만든다 */
 	CustomerPlaceholderSource findPlaceholderSource(@Param("customerId") long customerId);
 
+	/** 미리보기의 샘플 고객 — 삭제된 고객은 제외한다(발송용 findPlaceholderSource 는 그대로) */
+	CustomerPlaceholderSource findPreviewSource(@Param("customerId") long customerId);
+
 	/** 미리보기의 기본값 집계용 — customerIds 의 치환 원본을 한 번에 조회한다(삭제된 고객 제외) */
 	List<CustomerPlaceholderSource> findPlaceholderSources(@Param("customerIds") List<Long> customerIds);
 
