@@ -37,11 +37,15 @@ public interface SendLogMapper {
 	 */
 	List<SendLog> claimBatch();
 
-	/** 발송 성공 기록 */
-	void recordSent(@Param("sendLogId") long sendLogId, @Param("providerMessageId") String providerMessageId);
+	/**
+	 * 발송 성공 기록. 결과 기록 메서드는 모두 status = 'SENDING' 일 때만 먹고(멈춤 복구가 먼저 처리한 건을 늦은
+	 * 결과가 되살리지 못하게, PR #21 리뷰) 영향 행 수를 돌려준다 — 0 이면 호출한 쪽이 경고 로그를 남긴다.
+	 * @return 갱신된 행 수 (0 이면 이미 SENDING 이 아니었다)
+	 */
+	int recordSent(@Param("sendLogId") long sendLogId, @Param("providerMessageId") String providerMessageId);
 
 	/** 발송 실패(영구 오류) 기록 */
-	void recordFailed(@Param("sendLogId") long sendLogId, @Param("errorMessage") String errorMessage);
+	int recordFailed(@Param("sendLogId") long sendLogId, @Param("errorMessage") String errorMessage);
 
 	/** SES 웹훅용 — provider_message_id 로 send_log(고객 포함) 를 찾는다 (팀원1) */
 	SendLog findByProviderMessageId(@Param("providerMessageId") String providerMessageId);
@@ -49,17 +53,20 @@ public interface SendLogMapper {
 	/** 발송 직전 재확인(SendRecheck)용 — 선점 당시와 캠페인 상태가 바뀌었는지 다시 본다 */
 	String findCampaignStatus(@Param("campaignId") long campaignId);
 
-	/** 재확인 탈락(고객 삭제·동의 N·suppression·캠페인 COMPLETED): 종단 SKIPPED, 재시도하지 않는다 */
-	void recordSkipped(@Param("sendLogId") long sendLogId);
+	/**
+	 * 재확인 탈락(고객 삭제·동의 N·suppression·캠페인 COMPLETED): 종단 SKIPPED, 재시도하지 않는다.
+	 * reason 은 error_message 에 남겨(이전 재시도의 메시지를 덮어쓴다) 원인을 구분할 수 있게 한다
+	 */
+	int recordSkipped(@Param("sendLogId") long sendLogId, @Param("reason") String reason);
 
 	/** 재확인 보류(캠페인 PAUSED): next_attempt_at 은 바꾸지 않고 PENDING 으로 되돌린다(발송 큐 Plan 8장) */
-	void revertToPending(@Param("sendLogId") long sendLogId);
+	int revertToPending(@Param("sendLogId") long sendLogId);
 
 	/** 발송 시간창(08:00~20:50) 밖 보류: attempt_count 는 올리지 않고 next_attempt_at 만 설정한다(발송 큐 Plan 8장) */
-	void holdForSendWindow(@Param("sendLogId") long sendLogId, @Param("nextAttemptAt") OffsetDateTime nextAttemptAt);
+	int holdForSendWindow(@Param("sendLogId") long sendLogId, @Param("nextAttemptAt") OffsetDateTime nextAttemptAt);
 
 	/** 일시 오류(TRANSIENT) 재시도: attempt_count+1, next_attempt_at 설정, PENDING 으로 되돌린다(발송 큐 Plan 8장) */
-	void recordRetry(@Param("sendLogId") long sendLogId, @Param("nextAttemptAt") OffsetDateTime nextAttemptAt,
+	int recordRetry(@Param("sendLogId") long sendLogId, @Param("nextAttemptAt") OffsetDateTime nextAttemptAt,
 		@Param("errorMessage") String errorMessage);
 
 	/**
@@ -81,5 +88,5 @@ public interface SendLogMapper {
 	boolean isCouponValid(@Param("couponId") long couponId);
 
 	/** 재확인 이후 렌더링 단계에서 탈락(쿠폰 유효기간 밖): 종단 SKIPPED(COUPON_INVALID), 재시도하지 않는다 */
-	void recordSkippedCoupon(@Param("sendLogId") long sendLogId);
+	int recordSkippedCoupon(@Param("sendLogId") long sendLogId);
 }

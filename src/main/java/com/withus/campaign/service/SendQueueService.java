@@ -41,9 +41,15 @@ public class SendQueueService {
 	/**
 	 * 일회성·A/B 캠페인, F-12 수신동의 안내 등 instanceId 없는 적재. 대상을 500건씩 나눠 짧은 트랜잭션으로 적재한다.
 	 * 같은 (campaignId, customerId) 로 다시 호출해도 멱등하다(이미 적재된 건 건너뜀).
+	 * priority 는 호출자가 넘기지 않고 kind 로 정한다(발송 큐 Plan 2장): TEST 1, NOTICE 2, CAMPAIGN 3 —
+	 * (NOTICE, 3) 같은 잘못된 조합을 만들 수 없게 한다.
+	 * <p><b>호출자는 @Transactional 안에서 부르면 안 된다</b> — 청크의 TransactionTemplate 이 기본 전파(REQUIRED)라
+	 * 호출자 트랜잭션에 합류해 10만 건이 한 트랜잭션이 된다(Plan 2장 "긴 트랜잭션 금지"). 현재 호출자
+	 * (CampaignService.start, 예약 스케줄러)는 모두 트랜잭션이 없다. REQUIRES_NEW 로 강제하는 안은 PL 확인 대기
 	 * @return 새로 쌓인 건수(PENDING + SKIPPED)
 	 */
-	public int enqueueOneTime(Long campaignId, List<Long> customerIds, Channel channel, SendKind kind, short priority) {
+	public int enqueueOneTime(Long campaignId, List<Long> customerIds, Channel channel, SendKind kind) {
+		short priority = priorityOf(kind);
 		int totalInserted = 0;
 		for (int from = 0; from < customerIds.size(); from += BATCH_SIZE) {
 			List<Long> chunk = customerIds.subList(from, Math.min(from + BATCH_SIZE, customerIds.size()));
@@ -51,6 +57,14 @@ public class SendQueueService {
 				.execute(status -> enqueueOneTimeChunk(campaignId, chunk, channel, kind, priority));
 		}
 		return totalInserted;
+	}
+
+	private static short priorityOf(SendKind kind) {
+		return switch (kind) {
+			case TEST -> SendLog.PRIORITY_TEST;
+			case NOTICE -> SendLog.PRIORITY_WORKFLOW_OR_NOTICE;
+			case CAMPAIGN -> SendLog.PRIORITY_CAMPAIGN_BULK;
+		};
 	}
 
 	/** 워크플로우 SEND 노드 적재. 같은 (instanceId, stepId) 로 다시 호출해도 멱등하다 */
