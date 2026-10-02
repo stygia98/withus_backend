@@ -170,6 +170,45 @@
 		  AND (c.joined_at &gt; CURRENT_DATE - 180 OR <include refid="activeIn180Days"/>)
 	</update>
 
+	<!-- F-12: 발송 큐(팀원2)에 콜백을 두지 않고 send_log 를 주기 조회해 갱신한다 (PL 결정, #21). 채널 구분 없이 가장 최근 안내 -->
+	<update id="syncConsentNotifiedAt">
+		UPDATE customer c SET consent_notified_at = s.sent_at, updated_at = now()
+		FROM (SELECT customer_id, max(sent_at) AS sent_at FROM send_log
+		      WHERE kind = 'NOTICE' AND status = 'SENT' AND customer_id IS NOT NULL
+		      GROUP BY customer_id) s
+		WHERE c.customer_id = s.customer_id
+		  AND (c.consent_notified_at IS NULL OR c.consent_notified_at &lt; s.sent_at)
+	</update>
+
+	<!--
+		F-12 대상: 기준일 = GREATEST(채널 동의 일시, 같은 채널 마지막 SENT NOTICE) — consent_notified_at 은 채널 구분이
+		없어 기준으로 쓰지 않는다(Q3 제안안). 같은 채널 NOTICE 가 PENDING·SENDING 이면 08:00 보류 중이므로 다시 넣지 않는다.
+	-->
+	<select id="findConsentNoticeTargets" resultType="long">
+		SELECT c.customer_id FROM customer c
+		WHERE c.deleted_yn = 'N' AND c.customer_id &gt; #{afterId}
+		<choose>
+			<when test="channel == @com.withus.common.domain.Channel@EMAIL">
+				AND c.email_consent_yn = 'Y' AND c.email IS NOT NULL
+				AND GREATEST(c.email_consent_at, <include refid="lastSentNotice"/>) &lt;= now() - INTERVAL '2 years'
+			</when>
+			<otherwise>
+				AND c.sms_consent_yn = 'Y' AND c.phone IS NOT NULL
+				AND GREATEST(c.sms_consent_at, <include refid="lastSentNotice"/>) &lt;= now() - INTERVAL '2 years'
+			</otherwise>
+		</choose>
+		  AND NOT EXISTS (SELECT 1 FROM send_log s
+		                  WHERE s.customer_id = c.customer_id AND s.kind = 'NOTICE' AND s.channel = #{channel}
+		                    AND s.status IN ('PENDING', 'SENDING'))
+		ORDER BY c.customer_id
+		LIMIT #{limit}
+	</select>
+
+	<sql id="lastSentNotice">
+		(SELECT max(s.sent_at) FROM send_log s
+		 WHERE s.customer_id = c.customer_id AND s.kind = 'NOTICE' AND s.channel = #{channel} AND s.status = 'SENT')
+	</sql>
+
 	<select id="findConsentHistory" resultType="com.withus.customer.domain.ConsentHistory">
 		SELECT history_id, channel, before_yn, after_yn, source, note, changed_at
 		FROM consent_history WHERE customer_id = #{customerId}
