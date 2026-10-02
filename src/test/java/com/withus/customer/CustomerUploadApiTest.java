@@ -38,9 +38,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.withus.auth.domain.Role;
 import com.withus.auth.security.AuthMember;
+import com.withus.common.TestCsrf;
 import com.withus.customer.service.CustomerUploadFile;
-
-import jakarta.servlet.http.Cookie;
 
 /** 고객 업로드 (PRD F-01·9장·10.3, API_SPEC 3장). 로컬 Docker DB, 테스트마다 롤백 */
 @SpringBootTest
@@ -239,7 +238,7 @@ class CustomerUploadApiTest {
 
 	private ResultActions upload(String filename, byte[] bytes, Role role) throws Exception {
 		return mvc.perform(multipart("/api/v1/customers/uploads").file(new MockMultipartFile("file", filename,
-			"application/octet-stream", bytes)).with(auth(role)).with(realCsrf()));
+			"application/octet-stream", bytes)).with(auth(role)).with(TestCsrf.issue(mvc)));
 	}
 
 	private RequestPostProcessor auth(Role role) {
@@ -254,15 +253,5 @@ class CustomerUploadApiTest {
 			wb.write(out);
 			return out.toByteArray();
 		}
-	}
-
-	/** with(csrf()) 는 공유 컨텍스트의 CSRF 저장소를 바꿔 다른 테스트를 깨뜨리므로 실제 /auth/csrf 쿠키·헤더를 쓴다 (#36) */
-	private org.springframework.test.web.servlet.request.RequestPostProcessor realCsrf() throws Exception {
-		Cookie xsrf = mvc.perform(get("/api/v1/auth/csrf")).andReturn().getResponse().getCookie("XSRF-TOKEN");
-		return request -> {
-			request.setCookies(xsrf);
-			request.addHeader("X-XSRF-TOKEN", xsrf.getValue());
-			return request;
-		};
 	}
 }
