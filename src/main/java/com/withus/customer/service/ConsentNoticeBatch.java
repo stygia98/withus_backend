@@ -11,7 +11,6 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import com.withus.campaign.domain.SendKind;
-import com.withus.campaign.domain.SendLog;
 import com.withus.campaign.service.SendQueueService;
 import com.withus.common.domain.Channel;
 import com.withus.customer.mapper.CustomerMapper;
@@ -55,8 +54,7 @@ public class ConsentNoticeBatch {
 			long afterId = 0;
 			List<Long> ids;
 			while (!(ids = customerMapper.findConsentNoticeTargets(channel, afterId, CHUNK)).isEmpty()) {
-				queued += sendQueueService.enqueueOneTime(null, ids, channel, SendKind.NOTICE,
-					SendLog.PRIORITY_WORKFLOW_OR_NOTICE);
+				queued += sendQueueService.enqueueOneTime(null, ids, channel, SendKind.NOTICE);
 				afterId = ids.get(ids.size() - 1);
 			}
 			log.info("수신동의 확인 안내 적재: {} {}건", channel, queued);
