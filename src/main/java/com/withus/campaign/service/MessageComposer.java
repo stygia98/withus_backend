@@ -89,13 +89,20 @@ public class MessageComposer {
 		Map<String, String> values = new HashMap<>();
 		values.put("couponUrl", couponUrl);
 		if (customerId != null) {
-			CustomerPlaceholderSource source = sendLogMapper.findPlaceholderSource(customerId);
-			values.put("name", source.getName());
-			values.put("email", source.getEmail());
-			values.put("region", source.getRegionCode());
-			values.put("totalPurchase",
-				source.getTotalPurchase() == null ? null : String.valueOf(source.getTotalPurchase()));
+			return placeholderValues(sendLogMapper.findPlaceholderSource(customerId), couponUrl);
 		}
+		return values;
+	}
+
+	/** 실제 발송과 미리보기가 같은 치환 값을 쓰도록 공개한다 */
+	public static Map<String, String> placeholderValues(CustomerPlaceholderSource source, String couponUrl) {
+		Map<String, String> values = new HashMap<>();
+		values.put("couponUrl", couponUrl);
+		values.put("name", source.getName());
+		values.put("email", source.getEmail());
+		values.put("region", source.getRegionCode());
+		values.put("totalPurchase",
+			source.getTotalPurchase() == null ? null : String.valueOf(source.getTotalPurchase()));
 		return values;
 	}
 }
