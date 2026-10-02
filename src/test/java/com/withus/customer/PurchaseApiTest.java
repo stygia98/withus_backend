@@ -2,7 +2,6 @@ package com.withus.customer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -27,6 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.withus.auth.domain.Role;
 import com.withus.auth.security.AuthMember;
+import com.withus.common.TestCsrf;
 
 /** 구매 등록 (PRD F-10 ①, API_SPEC 3장). 로컬 Docker DB, 테스트마다 롤백 */
 @SpringBootTest
@@ -110,7 +110,7 @@ class PurchaseApiTest {
 		purchase(customerId, "{\"amount\":0}").andExpect(status().isBadRequest());
 		purchase(customerId, "{}").andExpect(status().isBadRequest());
 		mvc.perform(post(url(customerId)).content("{\"amount\":1000}").contentType(MediaType.APPLICATION_JSON)
-			.with(auth(Role.STAFF)).with(csrf())).andExpect(status().isForbidden());
+			.with(auth(Role.STAFF)).with(TestCsrf.issue(mvc))).andExpect(status().isForbidden());
 
 		jdbc.update("UPDATE customer SET deleted_yn = 'Y' WHERE customer_id = ?", customerId);
 		purchase(customerId, "{\"amount\":1000}").andExpect(status().isNotFound());
@@ -149,7 +149,7 @@ class PurchaseApiTest {
 
 	private ResultActions call(
 		org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder request) throws Exception {
-		return mvc.perform(request.contentType(MediaType.APPLICATION_JSON).with(auth(Role.MANAGER)).with(csrf()));
+		return mvc.perform(request.contentType(MediaType.APPLICATION_JSON).with(auth(Role.MANAGER)).with(TestCsrf.issue(mvc)));
 	}
 
 	private org.springframework.test.web.servlet.request.RequestPostProcessor auth(Role role) {

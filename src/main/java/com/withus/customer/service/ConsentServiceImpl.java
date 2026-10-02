@@ -1,6 +1,9 @@
 package com.withus.customer.service;
 
+import java.util.HashSet;
+import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,5 +25,16 @@ public class ConsentServiceImpl implements ConsentService {
 	@Transactional(readOnly = true)
 	public boolean isSendable(long customerId, Channel channel) {
 		return customerMapper.isSendable(customerId, Objects.requireNonNull(channel, "channel"));
+	}
+
+	/** 쿼리 1회. 호출자가 청크(500건)로 나눠 부른다 */
+	@Override
+	@Transactional(readOnly = true)
+	public Set<Long> filterSendable(List<Long> customerIds, Channel channel) {
+		Objects.requireNonNull(channel, "channel");
+		if (customerIds == null || customerIds.isEmpty()) {
+			return Set.of();
+		}
+		return new HashSet<>(customerMapper.filterSendable(customerIds, channel));
 	}
 }

@@ -7,6 +7,9 @@ import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -16,6 +19,7 @@ import com.withus.common.exception.BusinessException;
 import com.withus.common.exception.CommonErrorCode;
 import com.withus.tracking.domain.QueueCounts;
 import com.withus.tracking.domain.RecentEventRow;
+import com.withus.tracking.domain.StepSendStats;
 import com.withus.tracking.dto.CampaignAnalyticsResponse;
 import com.withus.tracking.dto.CampaignStepsResponse;
 import com.withus.tracking.dto.DailySendResponse;
@@ -63,15 +67,9 @@ public class DashboardService {
 	public DashboardSummaryResponse summary(LocalDate from, LocalDate to) {
 		LocalDate end = to != null ? to : LocalDate.now(clock);
 		LocalDate start = from != null ? from : end.minusDays(DEFAULT_SUMMARY_DAYS - 1);
-		if (start.isAfter(end)) {
-			throw invalid("from 은 to 보다 늦을 수 없습니다.");
-		}
-		if (ChronoUnit.DAYS.between(start, end) + 1 > MAX_SUMMARY_DAYS) {
-			throw invalid("조회 기간은 최대 " + MAX_SUMMARY_DAYS + "일입니다.");
-		}
-		OffsetDateTime fromTs = start.atStartOfDay(SEOUL).toOffsetDateTime();
-		OffsetDateTime toTs = end.plusDays(1).atStartOfDay(SEOUL).toOffsetDateTime();
-		return new DashboardSummaryResponse(start, end, SendKpi.of(dashboardMapper.sendStats(null, null, fromTs, toTs)));
+		SendDateBounds period = SendDateBounds.of(start, end, LocalDate.now(clock));
+		return new DashboardSummaryResponse(start, end,
+			SendKpi.of(dashboardMapper.sendStats(null, null, period.fromTs(), period.toTs())));
 	}
 
 	/** 오늘 포함 최근 days 일의 일별 발송 성공 건수 (오래된 날짜부터, 발송 없는 날은 0) */
@@ -111,31 +109,66 @@ public class DashboardService {
 		return new RecentEventsResponse(events, lastEventId);
 	}
 
-	/** 캠페인 KPI·전환 흐름 (기간 제한 없이 캠페인 전체) */
+	/** 캠페인 KPI·전환 흐름, 캠페인 전체 기간 (AI-03 요약 입력도 이 값) */
 	public CampaignAnalyticsResponse campaign(long campaignId) {
-		String name = dashboardMapper.campaignName(campaignId);
-		if (name == null) {
-			throw new BusinessException(CommonErrorCode.COMMON_NOT_FOUND);
-		}
-		return CampaignAnalyticsResponse.of(campaignId, name,
-			SendKpi.of(dashboardMapper.sendStats(campaignId, null, null, null)));
+		return campaign(campaignId, null, null);
 	}
 
-	/** 워크플로우 발송 단계별 KPI. 단계 수가 최대 15개(노드 제한)라 단계마다 같은 집계 SQL 을 쓴다 — 캠페인 KPI 와 정의를 맞추기 위해 */
-	public CampaignStepsResponse steps(long campaignId) {
+	/**
+	 * 캠페인 KPI·전환 흐름. from·to 는 발송일 기준 양 끝 포함이며 각각 생략할 수 있다(생략한 쪽은 제한 없음).
+	 * PRD F-09 기간 필터(최근 7/30일, 직접 지정)
+	 */
+	public CampaignAnalyticsResponse campaign(long campaignId, LocalDate from, LocalDate to) {
+		SendDateBounds period = SendDateBounds.of(from, to, LocalDate.now(clock));
+		String name = requireCampaignName(campaignId);
+		return CampaignAnalyticsResponse.of(campaignId, name, from, to,
+			SendKpi.of(dashboardMapper.sendStats(campaignId, null, period.fromTs(), period.toTs())));
+	}
+
+	/** 워크플로우 발송 단계별 KPI. 집계는 단계 수와 관계없이 쿼리 한 번이고, 발송이 없는 단계는 0 이다 */
+	public CampaignStepsResponse steps(long campaignId, LocalDate from, LocalDate to) {
+		SendDateBounds period = SendDateBounds.of(from, to, LocalDate.now(clock));
+		String name = requireCampaignName(campaignId);
+		String type = dashboardMapper.campaignType(campaignId);
+		if (!"WORKFLOW".equals(type)) {
+			return new CampaignStepsResponse(campaignId, name, type, from, to, List.of());
+		}
+		Map<Long, StepSendStats> statsByStep = dashboardMapper.sendStatsByStep(campaignId, period.fromTs(), period.toTs())
+			.stream().collect(Collectors.toMap(StepSendStats::getStepId, Function.identity()));
+		List<CampaignStepsResponse.StepAnalytics> steps = dashboardMapper.sendSteps(campaignId).stream()
+			.map(step -> new CampaignStepsResponse.StepAnalytics(step.getStepId(), step.getNodeType(),
+				step.getTemplateId(), step.getTemplateName(), step.getCouponId(),
+				SendKpi.of(statsByStep.getOrDefault(step.getStepId(), new StepSendStats()))))
+			.toList();
+		return new CampaignStepsResponse(campaignId, name, type, from, to, steps);
+	}
+
+	private String requireCampaignName(long campaignId) {
 		String name = dashboardMapper.campaignName(campaignId);
 		if (name == null) {
 			throw new BusinessException(CommonErrorCode.COMMON_NOT_FOUND);
 		}
-		String type = dashboardMapper.campaignType(campaignId);
-		List<CampaignStepsResponse.StepAnalytics> steps = "WORKFLOW".equals(type)
-			? dashboardMapper.sendSteps(campaignId).stream()
-				.map(step -> new CampaignStepsResponse.StepAnalytics(step.getStepId(), step.getNodeType(),
-					step.getTemplateId(), step.getTemplateName(), step.getCouponId(),
-					SendKpi.of(dashboardMapper.sendStats(campaignId, step.getStepId(), null, null))))
-				.toList()
-			: List.of();
-		return new CampaignStepsResponse(campaignId, name, type, steps);
+		return name;
+	}
+
+	/**
+	 * 날짜(한국 시간, 양 끝 포함) → 집계 SQL 의 [fromTs, toTs). 생략한 쪽은 null(제한 없음).
+	 * 기간 규칙은 대시보드·캠페인·단계별 성과가 모두 이것을 쓴다:
+	 * from ≤ to, from 을 주면 최대 366일(to 를 생략하면 오늘까지로 센다).
+	 * from 을 생략하면 캠페인 전체 기간(캠페인 하나로 범위가 이미 좁혀짐)이라 상한을 두지 않는다
+	 */
+	private record SendDateBounds(OffsetDateTime fromTs, OffsetDateTime toTs) {
+
+		static SendDateBounds of(LocalDate from, LocalDate to, LocalDate today) {
+			if (from != null && to != null && from.isAfter(to)) {
+				throw invalid("from 은 to 보다 늦을 수 없습니다.");
+			}
+			if (from != null && ChronoUnit.DAYS.between(from, to != null ? to : today) + 1 > MAX_SUMMARY_DAYS) {
+				throw invalid("조회 기간은 최대 " + MAX_SUMMARY_DAYS + "일입니다.");
+			}
+			return new SendDateBounds(from == null ? null : from.atStartOfDay(SEOUL).toOffsetDateTime(),
+				to == null ? null : to.plusDays(1).atStartOfDay(SEOUL).toOffsetDateTime());
+		}
 	}
 
 	private static BusinessException invalid(String message) {

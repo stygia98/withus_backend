@@ -14,7 +14,7 @@ import com.withus.tracking.service.BotDetector;
 class BotDetectorTest {
 
 	private final BotDetector detector = new BotDetector(
-		new TrackingProperties("http://localhost:8080", 10, List.of("bot", "Crawler", " preview "), "salt", 1));
+		new TrackingProperties("http://localhost:8080", 10, List.of("bot", "Crawler", " preview "), "salt", 1, List.of(" CuBot ")));
 
 	private final OffsetDateTime sentAt = OffsetDateTime.parse("2026-10-05T09:00:00+09:00");
 
@@ -23,6 +23,13 @@ class BotDetectorTest {
 		assertThat(detector.isBotUserAgent("Mozilla/5.0 (compatible; Googlebot/2.1)")).isTrue();
 		assertThat(detector.isBotUserAgent("SOME-CRAWLER/1.0")).isTrue();
 		assertThat(detector.isBotUserAgent("LinkPreview Agent")).isTrue();
+	}
+
+	@Test
+	void 예외_목록의_기기명은_대소문자와_공백을_무시하고_UA_에서_지운_뒤_판정한다() {
+		assertThat(detector.isBotUserAgent("Android 10; CUBOT X30")).isFalse();
+		// 예외 기기명을 지워도 다른 곳에 키워드가 있으면 봇
+		assertThat(detector.isBotUserAgent("Android 10; CUBOT X30; SecurityBot/1.0")).isTrue();
 	}
 
 	@Test
