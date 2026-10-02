@@ -2,7 +2,6 @@ package com.withus.customer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -27,6 +26,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.withus.auth.domain.Role;
 import com.withus.auth.security.AuthMember;
+
+import jakarta.servlet.http.Cookie;
 
 /** 구매 등록 (PRD F-10 ①, API_SPEC 3장). 로컬 Docker DB, 테스트마다 롤백 */
 @SpringBootTest
@@ -110,7 +111,7 @@ class PurchaseApiTest {
 		purchase(customerId, "{\"amount\":0}").andExpect(status().isBadRequest());
 		purchase(customerId, "{}").andExpect(status().isBadRequest());
 		mvc.perform(post(url(customerId)).content("{\"amount\":1000}").contentType(MediaType.APPLICATION_JSON)
-			.with(auth(Role.STAFF)).with(csrf())).andExpect(status().isForbidden());
+			.with(auth(Role.STAFF)).with(realCsrf())).andExpect(status().isForbidden());
 
 		jdbc.update("UPDATE customer SET deleted_yn = 'Y' WHERE customer_id = ?", customerId);
 		purchase(customerId, "{\"amount\":1000}").andExpect(status().isNotFound());
@@ -149,11 +150,21 @@ class PurchaseApiTest {
 
 	private ResultActions call(
 		org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder request) throws Exception {
-		return mvc.perform(request.contentType(MediaType.APPLICATION_JSON).with(auth(Role.MANAGER)).with(csrf()));
+		return mvc.perform(request.contentType(MediaType.APPLICATION_JSON).with(auth(Role.MANAGER)).with(realCsrf()));
 	}
 
 	private org.springframework.test.web.servlet.request.RequestPostProcessor auth(Role role) {
 		return authentication(new UsernamePasswordAuthenticationToken(new AuthMember(memberId, role), null,
 			List.of(new SimpleGrantedAuthority("ROLE_" + role.name()))));
+	}
+
+	/** with(csrf()) 는 공유 컨텍스트의 CSRF 저장소를 바꿔 다른 테스트를 깨뜨리므로 실제 /auth/csrf 쿠키·헤더를 쓴다 (#36) */
+	private org.springframework.test.web.servlet.request.RequestPostProcessor realCsrf() throws Exception {
+		Cookie xsrf = mvc.perform(get("/api/v1/auth/csrf")).andReturn().getResponse().getCookie("XSRF-TOKEN");
+		return request -> {
+			request.setCookies(xsrf);
+			request.addHeader("X-XSRF-TOKEN", xsrf.getValue());
+			return request;
+		};
 	}
 }

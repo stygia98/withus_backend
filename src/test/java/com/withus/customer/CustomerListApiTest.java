@@ -1,7 +1,6 @@
 package com.withus.customer;
 
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -27,6 +26,8 @@ import org.springframework.transaction.annotation.Transactional;
 import com.jayway.jsonpath.JsonPath;
 import com.withus.auth.domain.Role;
 import com.withus.auth.security.AuthMember;
+
+import jakarta.servlet.http.Cookie;
 
 /** 고객 목록 API (API_SPEC 3장 GET /customers). 테스트마다 고유 태그로 자기 데이터만 검색한다 */
 @SpringBootTest
@@ -119,11 +120,21 @@ class CustomerListApiTest {
 	}
 
 	private ResultActions call(MockHttpServletRequestBuilder request) throws Exception {
-		return mvc.perform(request.contentType(MediaType.APPLICATION_JSON).with(auth(Role.MANAGER)).with(csrf()));
+		return mvc.perform(request.contentType(MediaType.APPLICATION_JSON).with(auth(Role.MANAGER)).with(realCsrf()));
 	}
 
 	private static org.springframework.test.web.servlet.request.RequestPostProcessor auth(Role role) {
 		return authentication(new UsernamePasswordAuthenticationToken(new AuthMember(1L, role), null,
 			List.of(new SimpleGrantedAuthority("ROLE_" + role.name()))));
+	}
+
+	/** with(csrf()) 는 공유 컨텍스트의 CSRF 저장소를 바꿔 다른 테스트를 깨뜨리므로 실제 /auth/csrf 쿠키·헤더를 쓴다 (#36) */
+	private org.springframework.test.web.servlet.request.RequestPostProcessor realCsrf() throws Exception {
+		Cookie xsrf = mvc.perform(get("/api/v1/auth/csrf")).andReturn().getResponse().getCookie("XSRF-TOKEN");
+		return request -> {
+			request.setCookies(xsrf);
+			request.addHeader("X-XSRF-TOKEN", xsrf.getValue());
+			return request;
+		};
 	}
 }
