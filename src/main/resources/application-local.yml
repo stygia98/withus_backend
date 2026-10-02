@@ -13,8 +13,10 @@ spring:
       mail.smtp.timeout: 15000
       mail.smtp.writetimeout: 15000
   flyway:
-    # local 전용 시드(R__seed_local.sql, 반복 실행)는 db/migration/local 에 둔다 (DB_SCHEMA.md 9장)
-    locations: classpath:db/migration,classpath:db/migration/local
+    # local 전용 시드(R__seed_local.sql, 반복 실행)는 db/seed/local 에 둔다 (DB_SCHEMA.md 9장).
+    # db/migration 아래에 두면 안 된다: Flyway 는 location 을 하위 폴더까지 재귀로 스캔해서, 운영(locations: classpath:db/migration)에도
+    # 시드가 적용된다(이슈 #46). 이 폴더는 db/migration 의 하위가 아니므로 이 프로필에서만 읽힌다
+    locations: classpath:db/migration,classpath:db/seed/local
     # 브랜치를 오가며 DB 에는 적용됐지만 지금 코드에는 없는 마이그레이션(다른 팀원 대역 등)이 있어도 기동한다.
     # local 전용 — 운영은 검증을 그대로 둔다
     ignore-migration-patterns: "*:missing"
