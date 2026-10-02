@@ -216,12 +216,19 @@ class SendDispatcherTest {
 
 	@Test
 	void 한_건의_템플릿_조회_실패가_배치_전체를_멈추지_않는다() {
+		// send_log.step_id 는 workflow_step 을 FK 로 참조하므로, 존재하지 않는 step_id 를 그냥 넣으면
+		// insertWorkflowBatch 자체가 FK 위반으로 실패한다 — config_json 에 templateId 가 없는 실제 스텝을 써야 한다
+		jdbcTemplate.update(
+			"INSERT INTO workflow_step (campaign_id, node_type, config_json) VALUES (?, 'SEND_EMAIL', '{}'::jsonb)",
+			campaignId);
+		long stepWithoutTemplate = jdbcTemplate.queryForObject("SELECT max(step_id) FROM workflow_step", Long.class);
+
 		long brokenCustomer = newCustomer();
 		long goodCustomer = newCustomer();
 		SendLog broken = SendLog.builder()
 			.campaignId(campaignId)
 			.customerId(brokenCustomer)
-			.stepId(999_999_999L) // 존재하지 않는 스텝 — 템플릿을 못 찾아 compose() 에서 NPE 가 난다
+			.stepId(stepWithoutTemplate) // 템플릿이 연결 안 된 스텝 — 템플릿을 못 찾아 compose() 에서 NPE 가 난다
 			.recipient("customer-" + brokenCustomer + "@withus.local")
 			.channel(Channel.EMAIL)
 			.status(SendStatus.PENDING)

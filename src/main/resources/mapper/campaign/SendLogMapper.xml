@@ -99,7 +99,7 @@
 	</select>
 
 	<update id="markBounced">
-		UPDATE send_log SET status = 'BOUNCED' WHERE provider_message_id = #{providerMessageId}
+		UPDATE send_log SET status = 'BOUNCED' WHERE provider_message_id = #{providerMessageId} AND status = 'SENT'
 	</update>
 
 	<select id="findCampaignStatus" resultType="string">
