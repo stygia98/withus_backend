@@ -160,6 +160,10 @@
 		SELECT status FROM send_log WHERE instance_id = #{instanceId} AND step_id = #{stepId}
 	</select>
 
+	<select id="findResultById" resultType="com.withus.campaign.domain.SendLog">
+		SELECT * FROM send_log WHERE send_log_id = #{sendLogId}
+	</select>
+
 	<select id="findLatestSendLogId" resultType="long">
 		SELECT send_log_id FROM send_log WHERE instance_id = #{instanceId} AND channel = #{channel}
 		ORDER BY send_log_id DESC LIMIT 1

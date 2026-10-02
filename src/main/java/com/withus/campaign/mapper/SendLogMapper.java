@@ -79,6 +79,9 @@ public interface SendLogMapper {
 	/** 렌더링용 치환 값 원본(customer SELECT) — MessageComposer 가 PlaceholderRenderer 에 넘길 Map 을 만든다 */
 	CustomerPlaceholderSource findPlaceholderSource(@Param("customerId") long customerId);
 
+	/** 결과 기록 직후의 최신 행(status·sent_at) — WorkflowWakeup 이 쓴다 */
+	SendLog findResultById(@Param("sendLogId") long sendLogId);
+
 	/** 일회성 캠페인에 연결된 쿠폰 ID (없으면 null) */
 	Long findCouponIdByCampaignId(@Param("campaignId") long campaignId);
 

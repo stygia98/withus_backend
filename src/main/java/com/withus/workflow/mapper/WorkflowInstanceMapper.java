@@ -43,6 +43,11 @@ public interface WorkflowInstanceMapper {
 	 */
 	int recoverStuckRunning();
 
+	WorkflowInstance findById(@Param("instanceId") long instanceId);
+
+	/** 발송 결과가 도착해 기다리던 인스턴스의 실행 시각을 채운다. next_run_at 이 비어 있는 WAITING 만 — 이미 채워진 값은 덮어쓰지 않는다 */
+	int wake(@Param("instanceId") long instanceId, @Param("nextRunAt") OffsetDateTime nextRunAt);
+
 	/**
 	 * 트리거 일괄 생성: customerIds 마다 인스턴스를 WAITING(next_run_at=now) 으로 만든다.
 	 * uq_workflow_instance(campaign_id, customer_id) 충돌은 건너뛰어 재실행해도 멱등하다(워크플로우 Plan 6.1).

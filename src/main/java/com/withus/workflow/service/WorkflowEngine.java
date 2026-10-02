@@ -1,6 +1,5 @@
 package com.withus.workflow.service;
 
-import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.util.Map;
@@ -129,21 +128,9 @@ public class WorkflowEngine {
 		if (lastSendStatus == SendStatus.PENDING) {
 			workflowInstanceMapper.moveToWaitPending(instance.getInstanceId(), nextStepId);
 		} else {
-			OffsetDateTime nextRunAt = OffsetDateTime.now(ZoneId.of("Asia/Seoul")).plus(waitDuration(step));
+			OffsetDateTime nextRunAt = OffsetDateTime.now(ZoneId.of("Asia/Seoul")).plus(WaitDurations.of(step.getConfigJson(), objectMapper));
 			workflowInstanceMapper.moveToWait(instance.getInstanceId(), nextStepId, nextRunAt);
 		}
-	}
-
-	private Duration waitDuration(WorkflowStep step) {
-		Map<String, Object> config = parseConfig(step);
-		long amount = ((Number) config.get("amount")).longValue();
-		String unit = (String) config.get("unit");
-		return switch (unit) {
-			case "MINUTE" -> Duration.ofMinutes(amount);
-			case "HOUR" -> Duration.ofHours(amount);
-			case "DAY" -> Duration.ofDays(amount);
-			default -> throw new IllegalStateException("알 수 없는 WAIT 단위: " + unit);
-		};
 	}
 
 	/**

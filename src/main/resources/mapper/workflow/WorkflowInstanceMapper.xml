@@ -51,6 +51,15 @@
 		WHERE status = 'RUNNING' AND updated_at &lt; now() - INTERVAL '10 minutes'
 	</update>
 
+	<select id="findById" resultType="com.withus.workflow.domain.WorkflowInstance">
+		SELECT * FROM workflow_instance WHERE instance_id = #{instanceId}
+	</select>
+
+	<update id="wake">
+		UPDATE workflow_instance SET next_run_at = #{nextRunAt}, updated_at = now()
+		WHERE instance_id = #{instanceId} AND status = 'WAITING' AND next_run_at IS NULL
+	</update>
+
 	<insert id="insertBatch">
 		INSERT INTO workflow_instance (campaign_id, customer_id, current_step_id, status, next_run_at)
 		SELECT #{campaignId}, c.customer_id, #{stepId}, 'WAITING', now()

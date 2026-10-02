@@ -10,6 +10,8 @@ import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -23,6 +25,7 @@ import com.withus.campaign.service.messaging.MessageSenderRouter;
 import com.withus.campaign.service.messaging.OutboundMessage;
 import com.withus.campaign.service.messaging.SendResult;
 import com.withus.common.token.UnsubscribeTokens;
+import com.withus.workflow.service.WorkflowWakeup;
 import com.withus.customer.service.ConsentService;
 
 /**
@@ -50,11 +53,14 @@ public class SendDispatcher {
 	private final TokenBucket tokenBucket;
 	private final SendWindow sendWindow;
 	private final String trackingBaseUrl;
+	private final WorkflowWakeup workflowWakeup;
+	private final TransactionTemplate transactionTemplate;
 	private final boolean schedulerEnabled;
 
 	public SendDispatcher(SendLogMapper sendLogMapper, TemplateMapper templateMapper,
 			MessageSenderRouter messageSenderRouter, ConsentService consentService, MessageComposer messageComposer,
 			UnsubscribeTokens unsubscribeTokens,
+			WorkflowWakeup workflowWakeup, PlatformTransactionManager transactionManager,
 			@Value("${ses.max-send-rate}") int maxSendRate,
 			@Value("${withus.send-window.start}") String sendWindowStart,
 			@Value("${withus.send-window.end}") String sendWindowEnd,
@@ -66,6 +72,8 @@ public class SendDispatcher {
 		this.consentService = consentService;
 		this.messageComposer = messageComposer;
 		this.unsubscribeTokens = unsubscribeTokens;
+		this.workflowWakeup = workflowWakeup;
+		this.transactionTemplate = new TransactionTemplate(transactionManager);
 		this.tokenBucket = new TokenBucket(maxSendRate);
 		this.sendWindow = new SendWindow(LocalTime.parse(sendWindowStart), LocalTime.parse(sendWindowEnd));
 		this.trackingBaseUrl = trackingBaseUrl;
@@ -132,6 +140,21 @@ public class SendDispatcher {
 	}
 
 	/** 결과 기록 UPDATE 가 status = 'SENDING' 조건 때문에 0행이면(멈춤 복구가 먼저 처리한 건) 경고만 남긴다 */
+	/**
+	 * 종단 결과(SENT·FAILED·SKIPPED) 기록과 워크플로우 깨우기를 한 트랜잭션으로 묶는다(워크플로우 Plan 4.2) —
+	 * 따로 하면 기록만 되고 wake 가 빠져 인스턴스가 next_run_at NULL 로 영원히 멈출 수 있다.
+	 * 외부 호출(send)은 이미 끝난 뒤라 트랜잭션 안에 외부 호출은 없다
+	 */
+	private void recordAndWake(SendLog sendLog, String action, java.util.function.IntSupplier record) {
+		transactionTemplate.executeWithoutResult(s -> {
+			int updatedRows = record.getAsInt();
+			warnIfNotRecorded(updatedRows, sendLog, action);
+			if (updatedRows > 0) {
+				workflowWakeup.wake(sendLog);
+			}
+		});
+	}
+
 	private void warnIfNotRecorded(int updatedRows, SendLog sendLog, String action) {
 		if (updatedRows == 0) {
 			log.warn("{} 건너뜀: 이미 SENDING 이 아님(멈춤 복구가 먼저 처리했을 수 있음) sendLogId={}", action,
@@ -152,6 +175,7 @@ public class SendDispatcher {
 			trackingBaseUrl + "/unsubscribe/" + unsubscribeToken,
 			trackingBaseUrl + "/api/v1/unsubscribe/one-click/" + unsubscribeToken);
 		if (message.isEmpty()) {
+			transactionTemplate.executeWithoutResult(s -> workflowWakeup.wake(sendLog));
 			return; // 쿠폰 유효기간 밖 — compose 안에서 이미 SKIPPED(COUPON_INVALID) 기록
 		}
 		SendResult result = messageSenderRouter.send(message.get());
@@ -160,8 +184,7 @@ public class SendDispatcher {
 		} else if (result.errorType() == ErrorType.TRANSIENT) {
 			retryOrFail(sendLog, result.errorMessage());
 		} else {
-			warnIfNotRecorded(sendLogMapper.recordFailed(sendLog.getSendLogId(), result.errorMessage()), sendLog,
-				"recordFailed");
+			recordAndWake(sendLog, "recordFailed", () -> sendLogMapper.recordFailed(sendLog.getSendLogId(), result.errorMessage()));
 		}
 	}
 
@@ -172,8 +195,7 @@ public class SendDispatcher {
 	 */
 	private void recordSentSafely(SendLog sendLog, SendResult result) {
 		try {
-			warnIfNotRecorded(sendLogMapper.recordSent(sendLog.getSendLogId(), result.providerMessageId()), sendLog,
-				"recordSent");
+			recordAndWake(sendLog, "recordSent", () -> sendLogMapper.recordSent(sendLog.getSendLogId(), result.providerMessageId()));
 		} catch (Exception e) {
 			log.error("발송 성공 기록 실패 — 중복 발송을 피하려 재시도하지 않는다 sendLogId={}", sendLog.getSendLogId(), e);
 		}
@@ -183,8 +205,7 @@ public class SendDispatcher {
 	private void retryOrFail(SendLog sendLog, String errorMessage) {
 		int nextAttemptCount = sendLog.getAttemptCount() + 1;
 		if (nextAttemptCount > RETRY_INTERVALS.length) {
-			warnIfNotRecorded(sendLogMapper.recordFailed(sendLog.getSendLogId(), errorMessage), sendLog,
-				"recordFailed");
+			recordAndWake(sendLog, "recordFailed", () -> sendLogMapper.recordFailed(sendLog.getSendLogId(), errorMessage));
 			return;
 		}
 		OffsetDateTime nextAttemptAt = OffsetDateTime.now(ZoneId.of("Asia/Seoul"))
@@ -204,8 +225,7 @@ public class SendDispatcher {
 		}
 		if (!consentService.isSendable(sendLog.getCustomerId(), sendLog.getChannel())) {
 			// isSendable 하나로 고객 삭제·수신동의 N·suppression 세 가지를 한꺼번에 본다(Plan 15장 B1)
-			warnIfNotRecorded(sendLogMapper.recordSkipped(sendLog.getSendLogId(), "NOT_SENDABLE"), sendLog,
-				"recordSkipped");
+			recordAndWake(sendLog, "recordSkipped", () -> sendLogMapper.recordSkipped(sendLog.getSendLogId(), "NOT_SENDABLE"));
 			return false;
 		}
 		// NOTICE(F-12) 는 campaign_id 가 없다(PRD 7장) — 캠페인 상태 확인 대상이 아니다. primitive long 파라미터에
@@ -213,8 +233,8 @@ public class SendDispatcher {
 		if (sendLog.getCampaignId() != null) {
 			String campaignStatus = sendLogMapper.findCampaignStatus(sendLog.getCampaignId());
 			if ("COMPLETED".equals(campaignStatus)) {
-				warnIfNotRecorded(sendLogMapper.recordSkipped(sendLog.getSendLogId(), "CAMPAIGN_COMPLETED"), sendLog,
-					"recordSkipped");
+				recordAndWake(sendLog, "recordSkipped",
+					() -> sendLogMapper.recordSkipped(sendLog.getSendLogId(), "CAMPAIGN_COMPLETED"));
 				return false;
 			}
 			if ("PAUSED".equals(campaignStatus)) {
