@@ -1,7 +1,6 @@
 package com.withus.coupon;
 
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -21,18 +20,20 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
-import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.withus.auth.domain.Role;
 import com.withus.auth.security.AuthMember;
+import com.withus.common.TestCsrf;
 import com.withus.coupon.service.CouponService;
 
 /**
- * PRD 10.3 시연 시나리오를 DB 직접 조작 없이 실제 경로로만 잇는다:
+ * PRD 10.3 시연 시나리오를 잇는다:
  * 발송 직전 발급(CouponService.issue) → 고객 페이지 조회(GET, 변화 없음) → 사용하기(POST) 또는 관리자 구매 등록 → 캠페인 전환율.
+ * 발급 이후 단계는 실제 서비스·API 경로만 쓴다. 발송 큐가 할 일(send_log 적재와 SENT 처리)만 JDBC 로 대신한다 —
+ * 발송 큐(backend #21)가 병합되면 그 경로로 바꾼다.
  * - "메일로 받은 쿠폰을 /c/[token]에서 확인하고, 사용 처리하면 전환율에 반영된다"
  * - "관리자가 구매를 등록하면 … 전환율에 반영된다"
  * - "고객 페이지의 '사용하기'는 한 번만 되고, 링크를 열기만 해서는 사용 처리되지 않는다"
@@ -41,9 +42,6 @@ import com.withus.coupon.service.CouponService;
 @SpringBootTest
 @AutoConfigureMockMvc
 @Transactional
-// with(csrf()) 는 공유 컨텍스트의 CSRF 저장소를 바꿔 끼워, 이후 실제 /auth/csrf 쿠키를 쓰는 테스트를 깨뜨린다.
-// 실행 순서는 PC·OS 마다 다를 수 있으므로 끝나면 컨텍스트를 버린다 (docs/workflow-git.md 테스트 작성 규칙)
-@DirtiesContext
 class CouponConversionFlowTest {
 
 	private static final LocalDate TODAY = LocalDate.now(ZoneId.of("Asia/Seoul"));
@@ -59,8 +57,12 @@ class CouponConversionFlowTest {
 	long campaignId;
 	long couponId;
 
+	/** 실제 /auth/csrf 쿠키 방식 CSRF (common.TestCsrf) */
+	RequestPostProcessor csrf;
+
 	@BeforeEach
-	void setUp() {
+	void setUp() throws Exception {
+		csrf = TestCsrf.issue(mvc);
 		memberId = jdbc.queryForObject("INSERT INTO member (email, password, name, role) VALUES (?, 'x', '시연', 'MANAGER') "
 			+ "RETURNING member_id", Long.class, "flow-" + UUID.randomUUID() + "@withus.local");
 		long segmentId = jdbc.queryForObject("INSERT INTO segment (name, created_by) VALUES ('flow', ?) RETURNING segment_id",
@@ -121,7 +123,7 @@ class CouponConversionFlowTest {
 		// ② 관리자 구매 등록에서 쿠폰 선택 (팀원1 → CouponService.markUsed)
 		long issueId = jdbc.queryForObject("SELECT issue_id FROM coupon_issue WHERE send_log_id = ?", Long.class,
 			byPurchase.sendLogId());
-		mvc.perform(post("/api/v1/customers/" + byPurchase.customerId() + "/purchases").with(manager()).with(csrf())
+		mvc.perform(post("/api/v1/customers/" + byPurchase.customerId() + "/purchases").with(manager()).with(csrf)
 				.contentType(MediaType.APPLICATION_JSON)
 				.content("{\"amount\":45000,\"couponIssueId\":%d}".formatted(issueId)))
 			.andExpect(status().isOk());

@@ -75,13 +75,16 @@ class TrackEventRepositoryConditionTest {
 	}
 
 	@Test
-	void NOTICE_발송의_사람_이벤트는_NO() {
-		long notice = insertSendLog("NOTICE", "SENT");
-		insertEvent(notice, "OPEN", "N");
-		insertEvent(notice, "CLICK", "N");
+	void TEST_NOTICE_발송의_사람_이벤트는_NO() {
+		// CLAUDE.md 6장 8번: TEST·NOTICE 발송은 워크플로우 분기에서 제외
+		for (String kind : new String[] { "TEST", "NOTICE" }) {
+			long sendLogId = insertSendLog(kind, "SENT");
+			insertEvent(sendLogId, "OPEN", "N");
+			insertEvent(sendLogId, "CLICK", "N");
 
-		assertThat(repository.existsHumanEvent(notice, "OPEN")).isFalse();
-		assertThat(repository.existsHumanEvent(notice, "CLICK")).isFalse();
+			assertThat(repository.existsHumanEvent(sendLogId, "OPEN")).as(kind).isFalse();
+			assertThat(repository.existsHumanEvent(sendLogId, "CLICK")).as(kind).isFalse();
+		}
 	}
 
 	// ---- 픽스처 ----

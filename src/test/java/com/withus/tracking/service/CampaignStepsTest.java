@@ -1,12 +1,18 @@
 package com.withus.tracking.service;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import org.hamcrest.Matchers;
 import org.junit.jupiter.api.BeforeEach;
@@ -23,6 +29,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.withus.auth.domain.Role;
 import com.withus.auth.security.AuthMember;
+import com.withus.tracking.domain.SendStats;
+import com.withus.tracking.domain.StepSendStats;
+import com.withus.tracking.mapper.DashboardMapper;
 
 /**
  * 워크플로우 단계별 집계 (API_SPEC 10장, PRD F-09 "워크플로우 단계별로 집계").
@@ -37,6 +46,8 @@ class CampaignStepsTest {
 	MockMvc mvc;
 	@Autowired
 	JdbcTemplate jdbc;
+	@Autowired
+	DashboardMapper dashboardMapper;
 
 	long memberId;
 	long segmentId;
@@ -161,13 +172,53 @@ class CampaignStepsTest {
 	}
 
 	@Test
-	void 시작일이_종료일보다_늦으면_400() throws Exception {
+	void 기간이_잘못되면_캠페인과_단계_모두_400() throws Exception {
 		long campaignId = workflowCampaign();
 
-		mvc.perform(get("/api/v1/analytics/campaigns/" + campaignId).param("from", "2031-10-08").param("to", "2031-10-01")
+		for (String path : List.of("", "/steps")) {
+			String url = "/api/v1/analytics/campaigns/" + campaignId + path;
+			// 시작일이 종료일보다 늦음
+			mvc.perform(get(url).param("from", "2031-10-08").param("to", "2031-10-01").with(auth(Role.STAFF)))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.error.code").value("COMMON_INVALID_INPUT"));
+			// 양 끝을 지정하면 최대 366일 (대시보드와 같은 상한)
+			mvc.perform(get(url).param("from", "2030-01-01").param("to", "2031-01-02").with(auth(Role.STAFF)))
+				.andExpect(status().isBadRequest());
+			mvc.perform(get(url).param("from", "2030-01-01").param("to", "2031-01-01").with(auth(Role.STAFF)))
+				.andExpect(status().isOk());
+		}
+	}
+
+	@Test
+	void 기간_검증은_캠페인_존재_확인보다_먼저다() throws Exception {
+		for (String path : List.of("", "/steps")) {
+			mvc.perform(get("/api/v1/analytics/campaigns/" + Long.MAX_VALUE + path)
+					.param("from", "2031-10-08").param("to", "2031-10-01").with(auth(Role.STAFF)))
+				.andExpect(status().isBadRequest());
+		}
+	}
+
+	@Test
+	void 실패_건은_적재일_기준이라_이후_처리로_기간이_바뀌지_않는다() throws Exception {
+		long campaignId = workflowCampaign();
+		long s1 = step(campaignId, "SEND_EMAIL", "{}");
+		long customerId = jdbc.queryForObject("""
+			INSERT INTO customer (name, email, joined_at, source) VALUES ('실패', ?, DATE '2031-01-01', 'MANUAL') RETURNING customer_id
+			""", Long.class, "failed-" + UUID.randomUUID() + "@example.com");
+		// 10월 1일에 적재돼 실패했고, 나중(10월 9일)에 다른 처리로 updated_at 만 바뀌었다
+		jdbc.update("""
+			INSERT INTO send_log (campaign_id, step_id, customer_id, recipient, channel, kind, priority, status,
+			                      created_at, updated_at)
+			VALUES (?, ?, ?, 'f@withus.local', 'EMAIL', 'CAMPAIGN', 2, 'FAILED',
+			        TIMESTAMPTZ '2031-10-01 09:00:00+09', TIMESTAMPTZ '2031-10-09 09:00:00+09')
+			""", campaignId, s1, customerId);
+
+		mvc.perform(get("/api/v1/analytics/campaigns/" + campaignId).param("from", "2031-10-01").param("to", "2031-10-01")
 				.with(auth(Role.STAFF)))
-			.andExpect(status().isBadRequest())
-			.andExpect(jsonPath("$.error.code").value("COMMON_INVALID_INPUT"));
+			.andExpect(jsonPath("$.data.kpi.attempted").value(1));
+		mvc.perform(get("/api/v1/analytics/campaigns/" + campaignId + "/steps").param("from", "2031-10-09")
+				.param("to", "2031-10-09").with(auth(Role.STAFF)))
+			.andExpect(jsonPath("$.data.steps[0].kpi.attempted").value(0));
 	}
 
 	@Test
@@ -186,5 +237,117 @@ class CampaignStepsTest {
 	void 없는_캠페인은_404() throws Exception {
 		mvc.perform(get("/api/v1/analytics/campaigns/" + Long.MAX_VALUE + "/steps").with(auth(Role.MANAGER)))
 			.andExpect(status().isNotFound());
+	}
+
+	// ---- 단계별 한 번 집계(sendStatsByStep)가 단계마다의 sendStats 와 같은지 (PR #38 리뷰) ----
+
+	private long newCustomer() {
+		return jdbc.queryForObject("""
+			INSERT INTO customer (name, email, joined_at, source) VALUES ('혼합', ?, DATE '2031-01-01', 'MANUAL') RETURNING customer_id
+			""", Long.class, "mix-" + UUID.randomUUID() + "@example.com");
+	}
+
+	/** 단계 발송 1건과 이벤트. events 는 "OPEN:N", "CLICK:Y"(봇) 형식 */
+	private long sendRow(long campaignId, long stepId, long customerId, String kind, String status, String... events) {
+		long sendLogId = jdbc.queryForObject("""
+			INSERT INTO send_log (campaign_id, step_id, customer_id, recipient, channel, kind, priority, status, sent_at)
+			VALUES (?, ?, ?, 'mix@withus.local', 'EMAIL', ?, 2, ?, CASE WHEN ? IN ('SENT', 'BOUNCED') THEN now() END)
+			RETURNING send_log_id
+			""", Long.class, campaignId, stepId, customerId, kind, status, status);
+		for (String event : events) {
+			String[] typeAndBot = event.split(":");
+			jdbc.update("INSERT INTO track_event (send_log_id, event_type, bot_yn) VALUES (?, ?, ?)", sendLogId,
+				typeAndBot[0], typeAndBot[1]);
+		}
+		return sendLogId;
+	}
+
+	private void couponUsed(long sendLogId, long customerId) {
+		long couponId = jdbc.queryForObject("""
+			INSERT INTO coupon (name, discount_type, discount_value, valid_from, valid_to)
+			VALUES ('단계 쿠폰', 'AMOUNT', 1000, DATE '2031-01-01', DATE '2031-12-31') RETURNING coupon_id
+			""", Long.class);
+		jdbc.update("INSERT INTO coupon_issue (coupon_id, customer_id, send_log_id, used_at) VALUES (?, ?, ?, now())",
+			couponId, customerId, sendLogId);
+	}
+
+	@Test
+	void 단계별_한번_집계는_봇_TEST_NOTICE_BOUNCED가_섞여도_단계마다_sendStats와_같다() {
+		long campaignId = workflowCampaign();
+		long s1 = step(campaignId, "SEND_EMAIL", "{}");
+		long s2 = step(campaignId, "SEND_EMAIL", "{}");
+		long same = newCustomer();
+		// s1: 사람 오픈(2번)·클릭 + 쿠폰 사용, 봇만 있는 성공, 사람 오픈이 있는 BOUNCED, FAILED·SKIPPED
+		couponUsed(sendRow(campaignId, s1, same, "CAMPAIGN", "SENT", "OPEN:N", "OPEN:N", "CLICK:N"), same);
+		sendRow(campaignId, s1, newCustomer(), "CAMPAIGN", "SENT", "OPEN:Y", "CLICK:Y");
+		sendRow(campaignId, s1, newCustomer(), "CAMPAIGN", "BOUNCED", "OPEN:N");
+		sendRow(campaignId, s1, newCustomer(), "CAMPAIGN", "FAILED");
+		sendRow(campaignId, s1, newCustomer(), "CAMPAIGN", "SKIPPED");
+		// TEST·NOTICE 는 사람 이벤트가 있어도 모든 지표에서 빠진다 (CLAUDE.md 6장 8번)
+		sendRow(campaignId, s1, newCustomer(), "TEST", "SENT", "OPEN:N", "CLICK:N");
+		sendRow(campaignId, s1, newCustomer(), "NOTICE", "SENT", "OPEN:N", "CLICK:N");
+		// s2: 성공 1건, 이벤트 없음
+		sendRow(campaignId, s2, newCustomer(), "CAMPAIGN", "SENT");
+
+		Map<Long, StepSendStats> byStep = dashboardMapper.sendStatsByStep(campaignId, null, null).stream()
+			.collect(Collectors.toMap(StepSendStats::getStepId, Function.identity()));
+
+		for (long stepId : List.of(s1, s2)) {
+			SendStats single = dashboardMapper.sendStats(campaignId, stepId, null, null);
+			assertThat(byStep.get(stepId)).as("step %d", stepId).usingRecursiveComparison().ignoringFields("stepId")
+				.isEqualTo(single);
+		}
+		StepSendStats first = byStep.get(s1);
+		assertThat(first.getAttempted()).isEqualTo(4); // SENT 2 + BOUNCED 1 + FAILED 1 (SKIPPED·TEST·NOTICE 제외)
+		assertThat(first.getSent()).isEqualTo(2);
+		assertThat(first.getUniqueOpens()).isEqualTo(1); // 오픈 2번은 1명, 봇 오픈·BOUNCED 건 오픈은 제외
+		assertThat(first.getUniqueClicks()).isEqualTo(1);
+		assertThat(first.getCouponUsed()).isEqualTo(1);
+		assertThat(byStep.get(s2).getSent()).isEqualTo(1);
+	}
+
+	// ---- 기간 귀속: 반송은 발송 시각, 보류 후 실패는 적재 시각 (PR #38 리뷰) ----
+
+	@Test
+	void 반송은_발송일_보류_후_실패는_적재일로_집계된다() throws Exception {
+		long campaignId = workflowCampaign();
+		long s1 = step(campaignId, "SEND_EMAIL", "{}");
+		// 반송: 9월 30일 적재, 10월 1일 발송, 10월 5일 SES 반송으로 BOUNCED
+		jdbc.update("""
+			INSERT INTO send_log (campaign_id, step_id, customer_id, recipient, channel, kind, priority, status, created_at, sent_at, updated_at)
+			VALUES (?, ?, ?, 'b@withus.local', 'EMAIL', 'CAMPAIGN', 2, 'BOUNCED',
+			        TIMESTAMPTZ '2031-09-30 20:00:00+09', TIMESTAMPTZ '2031-10-01 08:00:00+09', TIMESTAMPTZ '2031-10-05 10:00:00+09')
+			""", campaignId, s1, newCustomer());
+		// 보류 후 실패: 10월 2일 21시 적재(광고 시간 밖이라 보류), 10월 3일 재시도 끝에 FAILED. sent_at 없음
+		jdbc.update("""
+			INSERT INTO send_log (campaign_id, step_id, customer_id, recipient, channel, kind, priority, status, created_at, updated_at)
+			VALUES (?, ?, ?, 'h@withus.local', 'EMAIL', 'CAMPAIGN', 2, 'FAILED',
+			        TIMESTAMPTZ '2031-10-02 21:00:00+09', TIMESTAMPTZ '2031-10-03 09:00:00+09')
+			""", campaignId, s1, newCustomer());
+
+		String url = "/api/v1/analytics/campaigns/" + campaignId + "/steps";
+		String[][] dayAndAttempted = { { "2031-09-30", "0" }, { "2031-10-01", "1" }, { "2031-10-02", "1" },
+			{ "2031-10-03", "0" }, { "2031-10-05", "0" } };
+		for (String[] expected : dayAndAttempted) {
+			mvc.perform(get(url).param("from", expected[0]).param("to", expected[0]).with(auth(Role.STAFF)))
+				.andExpect(jsonPath("$.data.steps[0].kpi.attempted").value(Integer.parseInt(expected[1])));
+		}
+	}
+
+	// ---- 366일 상한은 from 만 줘도 적용 (to 생략 = 오늘까지) ----
+
+	@Test
+	void from만_주면_오늘까지로_세어_366일_상한을_적용한다() throws Exception {
+		long campaignId = workflowCampaign();
+		LocalDate today = LocalDate.now(ZoneId.of("Asia/Seoul"));
+		for (String path : List.of("", "/steps")) {
+			String url = "/api/v1/analytics/campaigns/" + campaignId + path;
+			mvc.perform(get(url).param("from", today.minusDays(366).toString()).with(auth(Role.STAFF)))
+				.andExpect(status().isBadRequest());
+			mvc.perform(get(url).param("from", today.minusDays(365).toString()).with(auth(Role.STAFF)))
+				.andExpect(status().isOk());
+			// from 을 생략하면 캠페인 전체 기간이라 상한이 없다
+			mvc.perform(get(url).param("to", today.toString()).with(auth(Role.STAFF))).andExpect(status().isOk());
+		}
 	}
 }
