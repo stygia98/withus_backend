@@ -63,6 +63,12 @@
 		WHERE instance_id = #{instanceId} AND status = 'WAITING' AND next_run_at IS NULL
 	</update>
 
+	<!-- DRAFT 캠페인의 구조를 다시 저장할 때: 시작이 도중에 실패해 남은 인스턴스는 옛 단계를 가리키므로(FK) 지운다. 발송 이력이 있는 인스턴스는 지우지 않는다 -->
+	<delete id="deleteUnstartedByCampaign">
+		DELETE FROM workflow_instance wi WHERE wi.campaign_id = #{campaignId}
+		  AND NOT EXISTS (SELECT 1 FROM send_log s WHERE s.instance_id = wi.instance_id)
+	</delete>
+
 	<update id="cancelActiveByCampaign">
 		UPDATE workflow_instance SET status = 'CANCELLED', updated_at = now()
 		WHERE campaign_id = #{campaignId} AND status IN ('WAITING', 'RUNNING')

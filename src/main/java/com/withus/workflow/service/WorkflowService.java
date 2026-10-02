@@ -100,6 +100,8 @@ public class WorkflowService {
 
 		Map<String, Integer> depthByKey = computeDepths(steps);
 
+		// 시작이 도중에 실패한 DRAFT 캠페인에는 옛 단계를 가리키는 인스턴스가 남아 있을 수 있어(FK) 단계보다 먼저 지운다(PR #34 리뷰 🟡9)
+		workflowInstanceMapper.deleteUnstartedByCampaign(campaignId);
 		workflowStepMapper.deleteByCampaignId(campaignId);
 
 		List<WorkflowStep> toInsert = steps.stream().map(s -> {

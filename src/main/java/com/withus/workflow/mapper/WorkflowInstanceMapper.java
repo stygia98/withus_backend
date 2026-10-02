@@ -53,6 +53,9 @@ public interface WorkflowInstanceMapper {
 	/** 발송 결과가 도착해 기다리던 인스턴스의 실행 시각을 채운다. next_run_at 이 비어 있는 WAITING 만 — 이미 채워진 값은 덮어쓰지 않는다 */
 	int wake(@Param("instanceId") long instanceId, @Param("nextRunAt") OffsetDateTime nextRunAt);
 
+	/** DRAFT 캠페인 구조를 다시 저장할 때, 시작이 도중에 실패해 남은 발송 이력 없는 인스턴스를 지운다. @return 삭제된 건수 */
+	int deleteUnstartedByCampaign(@Param("campaignId") long campaignId);
+
 	/** 캠페인 수동 종료: 진행 중(WAITING·RUNNING)인 인스턴스를 CANCELLED 로 바꾼다(PRD 6.6). @return 취소된 건수 */
 	int cancelActiveByCampaign(@Param("campaignId") long campaignId);
 
