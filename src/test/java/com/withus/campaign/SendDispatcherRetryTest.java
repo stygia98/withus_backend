@@ -123,19 +123,28 @@ class SendDispatcherRetryTest {
 	void 일시_오류는_1_5_15분_뒤_재시도하고_네번째는_FAILED() {
 		when(messageSenderRouter.send(any())).thenReturn(SendResult.failure(ErrorType.TRANSIENT, "모의 스로틀링"));
 
+		markSending();
 		sendDispatcher.processOne(attempt(0)); // 1번째 실패 → attempt_count 1
 		assertRetryScheduledWithin(1, 1);
 
+		markSending();
 		sendDispatcher.processOne(attempt(1)); // 2번째 실패 → attempt_count 2
 		assertRetryScheduledWithin(2, 5);
 
+		markSending();
 		sendDispatcher.processOne(attempt(2)); // 3번째 실패 → attempt_count 3
 		assertRetryScheduledWithin(3, 15);
 
+		markSending();
 		sendDispatcher.processOne(attempt(3)); // 4번째 실패 → 재시도 없이 FAILED
 		String status = jdbcTemplate.queryForObject(
 			"SELECT status FROM send_log WHERE send_log_id = ?", String.class, sendLogId);
 		assertThat(status).isEqualTo("FAILED");
+	}
+
+	/** 결과 기록 UPDATE 는 status = 'SENDING' 일 때만 먹는다 — 선점(claimBatch)된 상태를 재현 */
+	private void markSending() {
+		jdbcTemplate.update("UPDATE send_log SET status = 'SENDING' WHERE send_log_id = ?", sendLogId);
 	}
 
 	private void assertRetryScheduledWithin(int expectedAttemptCount, int expectedMinutes) {

@@ -38,7 +38,8 @@ class CampaignStartOrderTest {
 	TemplateMapper templateMapper = mock(TemplateMapper.class);
 	SegmentService segmentService = mock(SegmentService.class);
 	SendQueueService sendQueueService = mock(SendQueueService.class);
-	CampaignService service = new CampaignService(campaignMapper, templateMapper, mock(SendLogMapper.class),
+	SendLogMapper sendLogMapper = mock(SendLogMapper.class);
+	CampaignService service = new CampaignService(campaignMapper, templateMapper, sendLogMapper,
 		segmentService, sendQueueService, mock(com.withus.workflow.service.WorkflowTriggerService.class),
 		mock(com.withus.workflow.mapper.WorkflowInstanceMapper.class), mock(com.withus.workflow.mapper.WorkflowStepMapper.class),
 		"08:00", "20:50", 14);
@@ -94,5 +95,34 @@ class CampaignStartOrderTest {
 		assertThatThrownBy(() -> service.start(1L)).isInstanceOfSatisfying(BusinessException.class,
 			e -> assertThat(e.getErrorCode()).isEqualTo(CampaignErrorCode.CAMPAIGN_INVALID_STATUS));
 		verify(segmentService, never()).findTargetCustomers(anyLong());
+	}
+
+	@Test
+	void 시작할_때_적재_전에_남은_PENDING부터_지운다() {
+		campaign(CampaignStatus.DRAFT);
+		template();
+		when(campaignMapper.start(1L)).thenReturn(1);
+
+		service.start(1L);
+
+		InOrder order = inOrder(sendLogMapper, sendQueueService, campaignMapper);
+		order.verify(sendLogMapper).deleteUnstartedCampaignPending(1L);
+		order.verify(sendQueueService).enqueueOneTime(1L, List.of(1L, 2L), Channel.EMAIL, SendKind.CAMPAIGN);
+		order.verify(campaignMapper).start(1L);
+	}
+
+	@Test
+	void 없는_쿠폰으로_캠페인을_만들면_400이다() {
+		Campaign campaign = new Campaign();
+		campaign.setType(CampaignType.ONE_TIME);
+		campaign.setSegmentId(7L);
+		campaign.setTemplateId(3L);
+		campaign.setCouponId(99L);
+		when(campaignMapper.existsSegment(7L)).thenReturn(true);
+		when(campaignMapper.existsCoupon(99L)).thenReturn(false);
+
+		assertThatThrownBy(() -> service.create(campaign, 1L)).isInstanceOf(BusinessException.class);
+
+		verify(campaignMapper, never()).insert(any());
 	}
 }
