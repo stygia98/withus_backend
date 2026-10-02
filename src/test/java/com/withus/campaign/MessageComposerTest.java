@@ -84,7 +84,7 @@ class MessageComposerTest {
 	@Test
 	void 쿠폰_발급_치환_광고문구_추적_헤더_순서로_조립한다() {
 		when(sendLogMapper.findCouponIdByCampaignId(1L)).thenReturn(5L);
-		when(sendLogMapper.isCouponValid(5L)).thenReturn(true);
+		when(sendLogMapper.isCouponValid(5L)).thenReturn(Boolean.TRUE);
 		UUID token = UUID.randomUUID();
 		when(couponService.issue(5L, 10L, 100L)).thenReturn(token);
 		when(sendLogMapper.findPlaceholderSource(10L)).thenReturn(NAMED_CUSTOMER);
@@ -113,7 +113,7 @@ class MessageComposerTest {
 	@Test
 	void 쿠폰이_유효기간_밖이면_발급을_호출하지_않고_SKIPPED로_기록한다() {
 		when(sendLogMapper.findCouponIdByCampaignId(1L)).thenReturn(5L);
-		when(sendLogMapper.isCouponValid(5L)).thenReturn(false);
+		when(sendLogMapper.isCouponValid(5L)).thenReturn(Boolean.FALSE);
 
 		Optional<OutboundMessage> result = messageComposer.compose(
 			emailLog(), template("제목", "본문", false), "https://withus.local/unsubscribe/abc",
