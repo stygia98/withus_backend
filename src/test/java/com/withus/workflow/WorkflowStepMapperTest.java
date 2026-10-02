@@ -58,10 +58,15 @@ class WorkflowStepMapperTest {
 		memberMapper.insert(member);
 		memberId = member.getMemberId();
 
+		// campaign.segment_id 는 NOT NULL 이라 세그먼트를 먼저 만든다
+		jdbcTemplate.update("INSERT INTO segment (name, created_by) VALUES (?, ?)", "세그먼트", memberId);
+		long segmentId = jdbcTemplate.queryForObject("SELECT max(segment_id) FROM segment", Long.class);
+
 		Campaign campaign = new Campaign();
 		campaign.setName("워크플로우 캠페인");
 		campaign.setType(CampaignType.WORKFLOW);
 		campaign.setStatus(CampaignStatus.DRAFT);
+		campaign.setSegmentId(segmentId);
 		campaign.setTriggerType(TriggerType.CUSTOMER_REGISTERED);
 		campaign.setCreatedBy(memberId);
 		campaignMapper.insert(campaign);
