@@ -25,7 +25,7 @@ import com.withus.workflow.service.WorkflowEngine;
  * 적재됐는지로 한다
  */
 @SpringBootTest(properties = { "withus.scheduler.workflow-engine.enabled=false",
-	"withus.scheduler.send-dispatcher.enabled=false" })
+	"withus.scheduler.send-dispatcher.enabled=false", "withus.scheduler.workflow-recovery.enabled=false" })
 @Transactional
 class WorkflowEngineConditionTest {
 

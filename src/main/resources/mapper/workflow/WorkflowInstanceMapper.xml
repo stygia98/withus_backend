@@ -34,4 +34,20 @@
 	<update id="complete">
 		UPDATE workflow_instance SET status = 'COMPLETED', updated_at = now() WHERE instance_id = #{instanceId}
 	</update>
+
+	<update id="recordRetry">
+		UPDATE workflow_instance SET status = 'WAITING', retry_count = retry_count + 1, next_run_at = #{nextRunAt},
+			last_error = #{errorMessage}, updated_at = now()
+		WHERE instance_id = #{instanceId}
+	</update>
+
+	<update id="recordFailed">
+		UPDATE workflow_instance SET status = 'FAILED', last_error = #{errorMessage}, updated_at = now()
+		WHERE instance_id = #{instanceId}
+	</update>
+
+	<update id="recoverStuckRunning">
+		UPDATE workflow_instance SET status = 'WAITING', next_run_at = now()
+		WHERE status = 'RUNNING' AND updated_at &lt; now() - INTERVAL '10 minutes'
+	</update>
 </mapper>

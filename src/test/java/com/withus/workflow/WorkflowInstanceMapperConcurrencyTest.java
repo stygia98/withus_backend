@@ -27,7 +27,8 @@ import com.withus.workflow.mapper.WorkflowInstanceMapper;
  * 선점 동시성 (DB_SCHEMA 7장, 엔진 1/4) — FOR UPDATE SKIP LOCKED 가 실제로 중복 선점을 막는지 검증.
  * @Transactional 을 안 쓴다: 두 스레드가 서로 다른 커넥션으로 동시에 들어가야 하므로 직접 정리한다
  */
-@SpringBootTest(properties = "withus.scheduler.workflow-engine.enabled=false")
+@SpringBootTest(properties = { "withus.scheduler.workflow-engine.enabled=false",
+	"withus.scheduler.workflow-recovery.enabled=false" })
 class WorkflowInstanceMapperConcurrencyTest {
 
 	@Autowired

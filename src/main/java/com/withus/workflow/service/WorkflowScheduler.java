@@ -47,11 +47,12 @@ public class WorkflowScheduler {
 			}
 			for (WorkflowInstance instance : claimed) {
 				try {
+					// processOne 은 tx2 실패를 내부에서 잡아 tx3(재시도/FAILED)로 기록하므로 보통 던지지 않는다.
+					// 이 catch 는 tx3 자체가 실패하는 등 마지막 안전망이다(발송 큐 PR #21 리뷰와 같은 교훈 —
+					// 한 건의 예외가 배치 전체를 멈추면 안 된다). 그래도 멈추면 RUNNING에 남아 멈춤 복구가 되돌린다
 					workflowEngine.processOne(instance);
 				} catch (Exception e) {
-					// 한 건의 예외가 배치 전체를 멈추면 안 된다(발송 큐 PR #21 리뷰와 같은 교훈).
-					// tx2 가 롤백돼 RUNNING에 남으므로, 엔진 4/4의 멈춤 복구가 나중에 WAITING 으로 되돌린다
-					log.warn("워크플로우 인스턴스 처리 실패 instanceId={}", instance.getInstanceId(), e);
+					log.error("워크플로우 인스턴스 처리 중 예상치 못한 오류 instanceId={}", instance.getInstanceId(), e);
 				}
 			}
 		}

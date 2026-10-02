@@ -22,7 +22,7 @@ import com.withus.workflow.service.WorkflowEngine;
  * send-dispatcher·workflow-engine 백그라운드 스케줄러를 둘 다 꺼서 processOne() 결과를 직접 검증한다
  */
 @SpringBootTest(properties = { "withus.scheduler.workflow-engine.enabled=false",
-	"withus.scheduler.send-dispatcher.enabled=false" })
+	"withus.scheduler.send-dispatcher.enabled=false", "withus.scheduler.workflow-recovery.enabled=false" })
 @Transactional
 class WorkflowEngineTest {
 
@@ -127,6 +127,51 @@ class WorkflowEngineTest {
 			instance.getInstanceId());
 		assertThat(nextRunAtIsNull).as("SKIPPED 로 적재된 건은 wake() 가 오지 않으므로 즉시 계산해야 한다(PL 리뷰 R2)")
 			.isFalse();
+	}
+
+	@Test
+	void 노드_실행_오류가_3회_재시도_뒤에도_나면_FAILED가_된다() {
+		// TRIGGER 는 실행 중 도달하면 IllegalStateException 을 던지도록 만들어져 있다 — 오류를 결정적으로 재현한다
+		long triggerStepId = jdbc.queryForObject("""
+			INSERT INTO workflow_step (campaign_id, node_type, config_json) VALUES (?, 'TRIGGER', '{}'::jsonb)
+			RETURNING step_id
+			""", Long.class, campaignId);
+		long customerId = newCustomer("Y");
+		WorkflowInstance instance = newInstance(customerId, triggerStepId);
+
+		for (int attempt = 1; attempt <= 3; attempt++) {
+			workflowEngine.processOne(instance);
+			if (attempt < 3) {
+				assertThat(instanceStatus(instance.getInstanceId())).isEqualTo("WAITING");
+				assertThat(instanceRetryCount(instance.getInstanceId())).isEqualTo(attempt);
+				instance = refetch(instance); // 다음 번 선점을 흉내 낸다 — 늘어난 retry_count 를 반영해 다시 불러온다
+			}
+		}
+
+		assertThat(instanceStatus(instance.getInstanceId())).isEqualTo("FAILED");
+		assertThat(instanceRetryCount(instance.getInstanceId())).isEqualTo(3);
+	}
+
+	private String instanceStatus(long instanceId) {
+		return jdbc.queryForObject("SELECT status FROM workflow_instance WHERE instance_id = ?", String.class,
+			instanceId);
+	}
+
+	private int instanceRetryCount(long instanceId) {
+		return jdbc.queryForObject("SELECT retry_count FROM workflow_instance WHERE instance_id = ?", Integer.class,
+			instanceId);
+	}
+
+	private WorkflowInstance refetch(WorkflowInstance instance) {
+		WorkflowInstance updated = new WorkflowInstance();
+		updated.setInstanceId(instance.getInstanceId());
+		updated.setCampaignId(instance.getCampaignId());
+		updated.setCustomerId(instance.getCustomerId());
+		updated.setCurrentStepId(jdbc.queryForObject(
+			"SELECT current_step_id FROM workflow_instance WHERE instance_id = ?", Long.class,
+			instance.getInstanceId()));
+		updated.setRetryCount(instanceRetryCount(instance.getInstanceId()));
+		return updated;
 	}
 
 	@Test

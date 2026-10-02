@@ -23,7 +23,8 @@ import com.withus.workflow.mapper.WorkflowInstanceMapper;
 /**
  * 워크플로우 인스턴스 선점 (DB_SCHEMA 7장, 엔진 1/4) — 로컬 Docker DB, 테스트마다 롤백
  */
-@SpringBootTest(properties = "withus.scheduler.workflow-engine.enabled=false")
+@SpringBootTest(properties = { "withus.scheduler.workflow-engine.enabled=false",
+	"withus.scheduler.workflow-recovery.enabled=false" })
 @Transactional
 class WorkflowInstanceMapperTest {
 
@@ -124,5 +125,27 @@ class WorkflowInstanceMapperTest {
 		assertThat(firstBatch).hasSize(500);
 		assertThat(secondBatch).hasSize(1);
 		assertThat(thirdBatch).isEmpty();
+	}
+
+	@Test
+	void RUNNING으로_10분_넘게_남은_인스턴스는_WAITING으로_복구된다() {
+		long campaignId = newCampaign("ACTIVE");
+		stepId = newStep(campaignId);
+		long stuckId = newInstance(campaignId, stepId, OffsetDateTime.now());
+		jdbc.update("UPDATE workflow_instance SET status = 'RUNNING', updated_at = now() - INTERVAL '11 minutes' "
+			+ "WHERE instance_id = ?", stuckId);
+		long freshId = newInstance(campaignId, stepId, OffsetDateTime.now());
+		jdbc.update("UPDATE workflow_instance SET status = 'RUNNING', updated_at = now() - INTERVAL '5 minutes' "
+			+ "WHERE instance_id = ?", freshId);
+
+		int recovered = workflowInstanceMapper.recoverStuckRunning();
+
+		assertThat(recovered).isEqualTo(1);
+		String stuckStatus = jdbc.queryForObject("SELECT status FROM workflow_instance WHERE instance_id = ?",
+			String.class, stuckId);
+		String freshStatus = jdbc.queryForObject("SELECT status FROM workflow_instance WHERE instance_id = ?",
+			String.class, freshId);
+		assertThat(stuckStatus).isEqualTo("WAITING");
+		assertThat(freshStatus).isEqualTo("RUNNING");
 	}
 }
