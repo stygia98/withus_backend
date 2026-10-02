@@ -99,7 +99,7 @@ public class WorkflowService {
 			WorkflowStep step = new WorkflowStep();
 			step.setCampaignId(campaignId);
 			step.setNodeType(s.nodeType());
-			step.setConfigJson(objectMapper.writeValueAsString(s.config()));
+			step.setConfigJson(objectMapper.writeValueAsString(s.config() == null ? Map.of() : s.config()));
 			step.setDepth(depthByKey.getOrDefault(s.key(), 0).shortValue());
 			return step;
 		}).toList();
@@ -111,9 +111,12 @@ public class WorkflowService {
 		}
 		for (int i = 0; i < steps.size(); i++) {
 			WorkflowStepRequest s = steps.get(i);
-			workflowStepMapper.updateLinks(toInsert.get(i).getStepId(), keyToStepId.get(s.next()),
-				keyToStepId.get(s.yes()), keyToStepId.get(s.no()));
+			WorkflowStep step = toInsert.get(i);
+			step.setNextStepId(keyToStepId.get(s.next()));
+			step.setYesStepId(keyToStepId.get(s.yes()));
+			step.setNoStepId(keyToStepId.get(s.no()));
 		}
+		workflowStepMapper.updateLinksBatch(toInsert);
 
 		return get(campaignId);
 	}

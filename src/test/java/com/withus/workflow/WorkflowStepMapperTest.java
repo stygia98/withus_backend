@@ -120,4 +120,35 @@ class WorkflowStepMapperTest {
 
 		assertThat(workflowStepMapper.findByCampaignId(campaignId)).isEmpty();
 	}
+
+	@Test
+	void updateLinksBatch로_여러_노드의_연결을_한_번에_저장한다() {
+		WorkflowStep trigger = step(NodeType.TRIGGER, "{}");
+		WorkflowStep condition = step(NodeType.CONDITION, "{}");
+		WorkflowStep end = step(NodeType.END, "{}");
+		workflowStepMapper.insertBatch(List.of(trigger, condition, end));
+		trigger.setNextStepId(condition.getStepId());
+		condition.setYesStepId(end.getStepId());
+		condition.setNoStepId(end.getStepId());
+
+		workflowStepMapper.updateLinksBatch(List.of(trigger, condition, end));
+
+		List<WorkflowStep> found = workflowStepMapper.findByCampaignId(campaignId);
+		assertThat(found).filteredOn(s -> s.getNodeType() == NodeType.TRIGGER)
+			.allSatisfy(s -> assertThat(s.getNextStepId()).isEqualTo(condition.getStepId()));
+		assertThat(found).filteredOn(s -> s.getNodeType() == NodeType.CONDITION)
+			.allSatisfy(s -> assertThat(s.getYesStepId()).isEqualTo(end.getStepId()));
+		assertThat(found).filteredOn(s -> s.getNodeType() == NodeType.END)
+			.allSatisfy(s -> assertThat(s.getNextStepId()).isNull());
+	}
+
+	@Test
+	void config가_null인_노드도_기본값_빈_객체로_저장된다() {
+		WorkflowStep end = step(NodeType.END, null);
+
+		workflowStepMapper.insertBatch(List.of(end));
+
+		assertThat(workflowStepMapper.findByCampaignId(campaignId)).extracting(WorkflowStep::getConfigJson)
+			.containsExactly("{}");
+	}
 }
