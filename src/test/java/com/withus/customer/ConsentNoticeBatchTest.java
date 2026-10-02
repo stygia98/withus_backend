@@ -80,6 +80,71 @@ class ConsentNoticeBatchTest {
 	}
 
 	@Test
+	void 정확히_2년이면_대상이다() {
+		// @Transactional 안에서 now() 는 트랜잭션 시작 시각으로 고정된다
+		long id = customer("2 years", null);
+		batch.run();
+		assertThat(notices(id)).hasSize(1);
+	}
+
+	@Test
+	void suppression_휴대폰_없음은_대상에서_빼고_SKIPPED_도_만들지_않는다() {
+		long suppressed = customer(OVER, null);
+		jdbc.update("INSERT INTO suppression (channel, value, reason) SELECT 'EMAIL', email, 'BOUNCE' FROM customer "
+			+ "WHERE customer_id = ?", suppressed);
+		long noPhone = customer(OVER, OVER);
+		jdbc.update("UPDATE customer SET phone = NULL WHERE customer_id = ?", noPhone);
+
+		batch.run();
+
+		assertThat(notices(suppressed)).isEmpty();
+		assertThat(notices(noPhone)).extracting(r -> r.get("channel")).containsExactly("EMAIL");
+	}
+
+	@Test
+	void 진행_중이거나_30일_안에_시도한_안내가_있으면_상태와_무관하게_다시_넣지_않는다() {
+		long sending = customer(OVER, null);
+		notice(sending, "EMAIL", "SENDING", "1 hour");
+		long failed = customer(OVER, null);
+		notice(failed, "EMAIL", "FAILED", "29 days");
+		long skipped = customer(OVER, null);
+		notice(skipped, "EMAIL", "SKIPPED", "1 day");
+		long oldFailure = customer(OVER, null);
+		notice(oldFailure, "EMAIL", "FAILED", "31 days");
+
+		batch.run();
+
+		assertThat(notices(sending)).hasSize(1);
+		assertThat(notices(failed)).hasSize(1);
+		assertThat(notices(skipped)).hasSize(1);
+		// 쿨다운이 지난 실패는 다시 안내한다
+		assertThat(notices(oldFailure)).extracting(r -> r.get("status")).containsExactlyInAnyOrder("FAILED", "PENDING");
+	}
+
+	@Test
+	void 꺼져_있으면_스케줄_실행은_아무것도_하지_않는다() {
+		long id = customer(OVER, null);
+		batch.tick(); // 테스트 컨텍스트는 기본값(false)
+		assertThat(notices(id)).isEmpty();
+	}
+
+	@Test
+	void 직전_안내_일시는_BOUNCED_도_반영하고_뒤로_가지_않는다() {
+		long bounced = customer("3 years", null);
+		notice(bounced, "EMAIL", "BOUNCED", "2 days");
+		long later = customer("3 years", null);
+		notice(later, "EMAIL", "SENT", "10 days");
+		jdbc.update("UPDATE customer SET consent_notified_at = now() - INTERVAL '1 day' WHERE customer_id = ?", later);
+
+		batch.run();
+
+		assertThat(jdbc.queryForObject("SELECT consent_notified_at = now() - INTERVAL '2 days' FROM customer "
+			+ "WHERE customer_id = ?", Boolean.class, bounced)).isTrue();
+		assertThat(jdbc.queryForObject("SELECT consent_notified_at = now() - INTERVAL '1 day' FROM customer "
+			+ "WHERE customer_id = ?", Boolean.class, later)).isTrue();
+	}
+
+	@Test
 	void SENT_된_NOTICE_로_직전_안내_일시를_갱신한다_멱등() {
 		long id = customer("3 years", null);
 		sentNotice(id, "EMAIL", "3 days");
@@ -106,8 +171,14 @@ class ConsentNoticeBatchTest {
 	}
 
 	private void sentNotice(long customerId, String channel, String ago) {
-		jdbc.update("INSERT INTO send_log (customer_id, recipient, channel, status, kind, priority, sent_at) "
-			+ "VALUES (?, 'x', ?, 'SENT', 'NOTICE', 2, now() - CAST(? AS INTERVAL))", customerId, channel, ago);
+		notice(customerId, channel, "SENT", ago);
+	}
+
+	/** ago 전에 적재·처리된 NOTICE (쿨다운은 created_at 으로 본다) */
+	private void notice(long customerId, String channel, String status, String ago) {
+		jdbc.update("INSERT INTO send_log (customer_id, recipient, channel, status, kind, priority, sent_at, created_at) "
+			+ "VALUES (?, 'x', ?, ?, 'NOTICE', 2, CASE WHEN ? IN ('SENT', 'BOUNCED') THEN now() - CAST(? AS INTERVAL) END, "
+			+ "now() - CAST(? AS INTERVAL))", customerId, channel, status, status, ago, ago);
 	}
 
 	private List<Map<String, Object>> notices(long customerId) {
