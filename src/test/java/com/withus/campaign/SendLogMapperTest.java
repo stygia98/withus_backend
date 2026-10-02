@@ -322,6 +322,8 @@ class SendLogMapperTest {
 	@Test
 	void 시작_실패로_남은_PENDING만_지우고_SENDING_이상과_TEST는_남긴다() {
 		long campaignId = newOneTimeCampaign(newSegment());
+		// 삭제는 DRAFT·SCHEDULED 캠페인에서만 일어난다(이슈 #52 상태 가드) — newOneTimeCampaign 은 ACTIVE 로 만든다
+		jdbcTemplate.update("UPDATE campaign SET status = 'DRAFT' WHERE campaign_id = ?", campaignId);
 		long sentCustomerId = newCustomer();
 		long testCustomerId = newCustomer();
 		sendLogMapper.insertOneTimeBatch(List.of(
