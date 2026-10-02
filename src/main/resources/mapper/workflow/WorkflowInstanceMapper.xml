@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.withus.workflow.mapper.WorkflowInstanceMapper">
+
+	<!-- UPDATE ... RETURNING 은 select 로 선언해야 ResultSet 을 받는다 (발송 큐 claimBatch 와 같은 관용 패턴) -->
+	<select id="claimBatch" resultType="com.withus.workflow.domain.WorkflowInstance">
+		UPDATE workflow_instance SET status = 'RUNNING', updated_at = now()
+		WHERE instance_id IN (
+			SELECT instance_id FROM workflow_instance wi
+			WHERE status = 'WAITING' AND next_run_at &lt;= now()
+			  AND EXISTS (
+			      SELECT 1 FROM campaign c
+			      WHERE c.campaign_id = wi.campaign_id AND c.status = 'ACTIVE'
+			  )
+			ORDER BY next_run_at
+			LIMIT 500
+			FOR UPDATE SKIP LOCKED
+		)
+		RETURNING *
+	</select>
+</mapper>
