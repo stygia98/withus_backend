@@ -98,6 +98,10 @@
 		SELECT * FROM send_log WHERE provider_message_id = #{providerMessageId}
 	</select>
 
+	<update id="markBounced">
+		UPDATE send_log SET status = 'BOUNCED' WHERE provider_message_id = #{providerMessageId}
+	</update>
+
 	<select id="findCampaignStatus" resultType="string">
 		SELECT status FROM campaign WHERE campaign_id = #{campaignId}
 	</select>

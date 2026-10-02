@@ -46,6 +46,9 @@ public interface SendLogMapper {
 	/** SES 웹훅용 — provider_message_id 로 send_log(고객 포함) 를 찾는다 (팀원1) */
 	SendLog findByProviderMessageId(@Param("providerMessageId") String providerMessageId);
 
+	/** SES 웹훅용 — 반송된 건을 BOUNCED 로 기록한다 (팀원1) */
+	void markBounced(@Param("providerMessageId") String providerMessageId);
+
 	/** 발송 직전 재확인(SendRecheck)용 — 선점 당시와 캠페인 상태가 바뀌었는지 다시 본다 */
 	String findCampaignStatus(@Param("campaignId") long campaignId);
 
