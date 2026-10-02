@@ -2,10 +2,10 @@ package com.withus.customer.service;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
-import java.util.Locale;
 import java.util.regex.Pattern;
 
 import com.withus.common.exception.BusinessException;
+import com.withus.common.normalize.Emails;
 import com.withus.customer.domain.CustomerErrorCode;
 import com.withus.customer.domain.Region;
 
@@ -21,9 +21,9 @@ public final class CustomerNormalizer {
 	private CustomerNormalizer() {
 	}
 
-	/** 소문자 + 앞뒤 공백 제거. AuthService.normalizeEmail 과 같은 동작 */
+	/** 소문자 + 앞뒤 공백 제거. 관리자 계정과 같은 규칙을 쓰도록 공통 기준에 맡긴다 */
 	public static String email(String value) {
-		return value == null ? null : value.trim().toLowerCase(Locale.ROOT);
+		return Emails.normalize(value);
 	}
 
 	/** 숫자만 남긴다. 빈 값은 null */

@@ -1,7 +1,6 @@
 package com.withus.auth.service;
 
 import java.time.OffsetDateTime;
-import java.util.Locale;
 import java.util.Map;
 
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -13,6 +12,7 @@ import com.withus.auth.mapper.MemberMapper;
 import com.withus.auth.security.JwtProvider;
 import com.withus.common.exception.BusinessException;
 import com.withus.common.exception.CommonErrorCode;
+import com.withus.common.normalize.Emails;
 
 import io.jsonwebtoken.JwtException;
 
@@ -40,7 +40,7 @@ public class AuthService {
 	}
 
 	public Tokens login(String rawEmail, String password) {
-		Member member = memberMapper.findByEmail(normalizeEmail(rawEmail));
+		Member member = memberMapper.findByEmail(Emails.normalize(rawEmail));
 		if (member == null) {
 			passwordEncoder.matches(password, dummyHash);
 			throw new BusinessException(AuthErrorCode.AUTH_INVALID_CREDENTIALS);
@@ -96,10 +96,5 @@ public class AuthService {
 			throw new BusinessException(CommonErrorCode.COMMON_NOT_FOUND);
 		}
 		return member;
-	}
-
-	// ponytail: 팀원1의 정규화 유틸(F-01)이 생기면 그것으로 교체
-	static String normalizeEmail(String email) {
-		return email == null ? null : email.trim().toLowerCase(Locale.ROOT);
 	}
 }

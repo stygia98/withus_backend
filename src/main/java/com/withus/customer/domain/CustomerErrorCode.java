@@ -21,7 +21,9 @@ public enum CustomerErrorCode implements ErrorCode {
 	UPLOAD_FILE_TOO_LARGE(HttpStatus.BAD_REQUEST, "파일은 10MB까지 올릴 수 있습니다."),
 	UPLOAD_TOO_MANY_ROWS(HttpStatus.BAD_REQUEST, "한 번에 10,000행까지 올릴 수 있습니다."),
 	UPLOAD_INVALID_HEADER(HttpStatus.BAD_REQUEST, "첫 행이 업로드 양식의 헤더와 다릅니다. 양식 파일을 내려받아 쓰세요."),
-	UPLOAD_INVALID_FILE(HttpStatus.BAD_REQUEST, "xlsx 또는 csv 파일만 올릴 수 있습니다.");
+	UPLOAD_INVALID_FILE(HttpStatus.BAD_REQUEST, "xlsx 또는 csv 파일만 올릴 수 있습니다."),
+	// 수신거부 (API_SPEC 8장). 실패 사유는 구분하지 않는다 (PRD 8.3)
+	UNSUBSCRIBE_INVALID_TOKEN(HttpStatus.BAD_REQUEST, "유효하지 않은 링크입니다.");
 
 	private final HttpStatus status;
 	private final String message;
