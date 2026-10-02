@@ -208,6 +208,23 @@ class SendLogMapperTest {
 	}
 
 	@Test
+	void ACTIVE_전에_미리_적재된_DRAFT_SCHEDULED_캠페인_건은_선점_대상에서_제외된다() {
+		long segmentId = newSegment();
+		long draftCampaignId = newOneTimeCampaign(segmentId);
+		jdbcTemplate.update("UPDATE campaign SET status = 'DRAFT' WHERE campaign_id = ?", draftCampaignId);
+		sendLogMapper.insertOneTimeBatch(List.of(oneTimeLog(draftCampaignId, customerId)));
+		long scheduledCampaignId = newOneTimeCampaign(segmentId);
+		jdbcTemplate.update("UPDATE campaign SET status = 'SCHEDULED', scheduled_at = now() + interval '1 day' "
+			+ "WHERE campaign_id = ?", scheduledCampaignId);
+		sendLogMapper.insertOneTimeBatch(List.of(oneTimeLog(scheduledCampaignId, newCustomer())));
+
+		List<SendLog> claimed = sendLogMapper.claimBatch();
+
+		assertThat(claimed).extracting(SendLog::getCampaignId)
+			.doesNotContain(draftCampaignId, scheduledCampaignId);
+	}
+
+	@Test
 	void 발송_성공을_기록하면_provider_message_id로_조회된다() {
 		long segmentId = newSegment();
 		long campaignId = newOneTimeCampaign(segmentId);

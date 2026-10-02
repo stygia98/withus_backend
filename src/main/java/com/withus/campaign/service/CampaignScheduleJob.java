@@ -1,9 +1,12 @@
 package com.withus.campaign.service;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import com.withus.campaign.domain.CampaignErrorCode;
 import com.withus.campaign.mapper.CampaignMapper;
 import com.withus.common.exception.BusinessException;
 
@@ -14,6 +17,8 @@ import com.withus.common.exception.BusinessException;
  */
 @Component
 public class CampaignScheduleJob {
+
+	private static final Logger log = LoggerFactory.getLogger(CampaignScheduleJob.class);
 
 	private final CampaignMapper campaignMapper;
 	private final CampaignService campaignService;
@@ -42,7 +47,13 @@ public class CampaignScheduleJob {
 				campaignService.start(campaignId);
 				started++;
 			} catch (BusinessException e) {
-				// CAMPAIGN_SEND_WINDOW_EXCEEDED·COUPON_OUT_OF_PERIOD 등 — 다음 주기에 재시도
+				// 동시에 수동 시작·취소된 건(CAMPAIGN_INVALID_STATUS)은 조용히 넘기고, 창·쿠폰 기간 등 그 외는 다음 주기에 다시 보되
+				// 계속 실패하는 캠페인을 알아챌 수 있게 로그를 남긴다(PR #31 리뷰 🟡4)
+				if (e.getErrorCode() != CampaignErrorCode.CAMPAIGN_INVALID_STATUS) {
+					log.warn("예약 캠페인 시작 보류 campaignId={} code={}", campaignId, e.getErrorCode());
+				}
+			} catch (RuntimeException e) {
+				log.error("예약 캠페인 시작 중 예상치 못한 오류 campaignId={}", campaignId, e);
 			}
 		}
 		return started;

@@ -33,7 +33,8 @@ public interface SendLogMapper {
 
 	/**
 	 * 선점: PENDING 중 priority·send_log_id 순으로 최대 50건을 SENDING 으로 바꾸고 그 행을 돌려준다.
-	 * PAUSED 캠페인 건은 선점 대상에서 제외한다(발송 큐 Plan 15장 A1 — 안 하면 계속 선점·반환을 반복해 다른 캠페인이 밀린다).
+	 * DRAFT·SCHEDULED·PAUSED 캠페인 건은 선점 대상에서 제외한다 — PAUSED 는 발송 큐 Plan 15장 A1(안 하면 계속 선점·반환을 반복해
+	 * 다른 캠페인이 밀린다), DRAFT·SCHEDULED 는 캠페인이 ACTIVE 가 되기 전에 미리 적재된 건이 먼저 나가지 않게 한다(PR #31 리뷰 🔴1).
 	 */
 	List<SendLog> claimBatch();
 
