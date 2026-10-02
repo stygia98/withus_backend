@@ -161,13 +161,53 @@ class CampaignStepsTest {
 	}
 
 	@Test
-	void 시작일이_종료일보다_늦으면_400() throws Exception {
+	void 기간이_잘못되면_캠페인과_단계_모두_400() throws Exception {
 		long campaignId = workflowCampaign();
 
-		mvc.perform(get("/api/v1/analytics/campaigns/" + campaignId).param("from", "2031-10-08").param("to", "2031-10-01")
+		for (String path : List.of("", "/steps")) {
+			String url = "/api/v1/analytics/campaigns/" + campaignId + path;
+			// 시작일이 종료일보다 늦음
+			mvc.perform(get(url).param("from", "2031-10-08").param("to", "2031-10-01").with(auth(Role.STAFF)))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.error.code").value("COMMON_INVALID_INPUT"));
+			// 양 끝을 지정하면 최대 366일 (대시보드와 같은 상한)
+			mvc.perform(get(url).param("from", "2030-01-01").param("to", "2031-01-02").with(auth(Role.STAFF)))
+				.andExpect(status().isBadRequest());
+			mvc.perform(get(url).param("from", "2030-01-01").param("to", "2031-01-01").with(auth(Role.STAFF)))
+				.andExpect(status().isOk());
+		}
+	}
+
+	@Test
+	void 기간_검증은_캠페인_존재_확인보다_먼저다() throws Exception {
+		for (String path : List.of("", "/steps")) {
+			mvc.perform(get("/api/v1/analytics/campaigns/" + Long.MAX_VALUE + path)
+					.param("from", "2031-10-08").param("to", "2031-10-01").with(auth(Role.STAFF)))
+				.andExpect(status().isBadRequest());
+		}
+	}
+
+	@Test
+	void 실패_건은_적재일_기준이라_이후_처리로_기간이_바뀌지_않는다() throws Exception {
+		long campaignId = workflowCampaign();
+		long s1 = step(campaignId, "SEND_EMAIL", "{}");
+		long customerId = jdbc.queryForObject("""
+			INSERT INTO customer (name, email, joined_at, source) VALUES ('실패', ?, DATE '2031-01-01', 'MANUAL') RETURNING customer_id
+			""", Long.class, "failed-" + UUID.randomUUID() + "@example.com");
+		// 10월 1일에 적재돼 실패했고, 나중(10월 9일)에 다른 처리로 updated_at 만 바뀌었다
+		jdbc.update("""
+			INSERT INTO send_log (campaign_id, step_id, customer_id, recipient, channel, kind, priority, status,
+			                      created_at, updated_at)
+			VALUES (?, ?, ?, 'f@withus.local', 'EMAIL', 'CAMPAIGN', 2, 'FAILED',
+			        TIMESTAMPTZ '2031-10-01 09:00:00+09', TIMESTAMPTZ '2031-10-09 09:00:00+09')
+			""", campaignId, s1, customerId);
+
+		mvc.perform(get("/api/v1/analytics/campaigns/" + campaignId).param("from", "2031-10-01").param("to", "2031-10-01")
 				.with(auth(Role.STAFF)))
-			.andExpect(status().isBadRequest())
-			.andExpect(jsonPath("$.error.code").value("COMMON_INVALID_INPUT"));
+			.andExpect(jsonPath("$.data.kpi.attempted").value(1));
+		mvc.perform(get("/api/v1/analytics/campaigns/" + campaignId + "/steps").param("from", "2031-10-09")
+				.param("to", "2031-10-09").with(auth(Role.STAFF)))
+			.andExpect(jsonPath("$.data.steps[0].kpi.attempted").value(0));
 	}
 
 	@Test
