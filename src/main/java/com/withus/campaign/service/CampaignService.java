@@ -271,7 +271,7 @@ public class CampaignService {
 					Map.of("nextAvailableAt", result.nextAvailableAt()));
 			}
 		}
-		if (campaign.getCouponId() != null && !sendLogMapper.isCouponValid(campaign.getCouponId())) {
+		if (campaign.getCouponId() != null && !Boolean.TRUE.equals(sendLogMapper.isCouponValid(campaign.getCouponId()))) {
 			throw new BusinessException(CouponErrorCode.COUPON_OUT_OF_PERIOD);
 		}
 	}

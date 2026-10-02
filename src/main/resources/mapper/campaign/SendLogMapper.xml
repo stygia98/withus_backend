@@ -146,7 +146,7 @@
 		SELECT (config_json ->> 'couponId')::bigint FROM workflow_step WHERE step_id = #{stepId}
 	</select>
 
-	<select id="isCouponValid" resultType="boolean">
+	<select id="isCouponValid" resultType="java.lang.Boolean">
 		SELECT CURRENT_DATE BETWEEN valid_from AND valid_to FROM coupon WHERE coupon_id = #{couponId}
 	</select>
 
