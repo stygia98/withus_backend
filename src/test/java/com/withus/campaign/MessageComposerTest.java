@@ -91,14 +91,15 @@ class MessageComposerTest {
 
 		Optional<OutboundMessage> result = messageComposer.compose(
 			emailLog(), template("{{name}}님 안내", "<p>{{name}}님, 쿠폰: {{couponUrl}}</p>", true),
-			"https://withus.local/unsubscribe/abc");
+			"https://withus.local/unsubscribe/abc", "https://withus.local/api/v1/unsubscribe/one-click/abc");
 
 		assertThat(result).isPresent();
 		OutboundMessage message = result.get();
 		assertThat(message.subject()).isEqualTo("(광고) 홍길동님 안내");
 		assertThat(message.body()).contains("홍길동님").contains("https://withus.local/c/" + token)
 			.contains("수신거부");
-		assertThat(message.headers()).containsEntry("List-Unsubscribe", "<https://withus.local/unsubscribe/abc>")
+		assertThat(message.headers())
+			.containsEntry("List-Unsubscribe", "<https://withus.local/api/v1/unsubscribe/one-click/abc>")
 			.containsEntry("List-Unsubscribe-Post", "List-Unsubscribe=One-Click");
 
 		InOrder order = inOrder(sendLogMapper, couponService, trackingLinkService);
@@ -115,7 +116,8 @@ class MessageComposerTest {
 		when(sendLogMapper.isCouponValid(5L)).thenReturn(false);
 
 		Optional<OutboundMessage> result = messageComposer.compose(
-			emailLog(), template("제목", "본문", false), "https://withus.local/unsubscribe/abc");
+			emailLog(), template("제목", "본문", false), "https://withus.local/unsubscribe/abc",
+			"https://withus.local/api/v1/unsubscribe/one-click/abc");
 
 		assertThat(result).isEmpty();
 		verify(couponService, never()).issue(anyLong(), anyLong(), anyLong());
@@ -128,7 +130,8 @@ class MessageComposerTest {
 		when(sendLogMapper.findPlaceholderSource(10L)).thenReturn(NAMELESS_CUSTOMER);
 
 		Optional<OutboundMessage> result = messageComposer.compose(
-			emailLog(), template("{{name}}님 환영", "본문", false), "https://withus.local/unsubscribe/abc");
+			emailLog(), template("{{name}}님 환영", "본문", false), "https://withus.local/unsubscribe/abc",
+			"https://withus.local/api/v1/unsubscribe/one-click/abc");
 
 		assertThat(result).isPresent();
 		assertThat(result.get().subject()).isEqualTo("고객님 환영");
@@ -143,7 +146,8 @@ class MessageComposerTest {
 			.recipient("01000000000").build();
 
 		Optional<OutboundMessage> result = messageComposer.compose(
-			smsLog, template(null, "{{name}}님 세일 중", true), "https://withus.local/unsubscribe/abc");
+			smsLog, template(null, "{{name}}님 세일 중", true), "https://withus.local/unsubscribe/abc",
+			"https://withus.local/api/v1/unsubscribe/one-click/abc");
 
 		assertThat(result).isPresent();
 		OutboundMessage message = result.get();
