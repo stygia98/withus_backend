@@ -1,0 +1,80 @@
+package com.withus.workflow.mapper;
+
+import java.time.OffsetDateTime;
+import java.util.List;
+
+import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
+
+import com.withus.workflow.domain.WorkflowInstance;
+
+@Mapper
+public interface WorkflowInstanceMapper {
+
+	/**
+	 * 선점: WAITING 중 next_run_at 이 지난 것을 최대 500건 RUNNING 으로 바꾸고 그 행을 돌려준다
+	 * (DB_SCHEMA 7장). 캠페인이 ACTIVE 인 것만 선점한다(PAUSED·COMPLETED 등은 제외) — 발송 큐
+	 * claimBatch 의 PAUSED 제외(Plan 15장 A1)와 같은 이유로, 안 하면 멈춘 캠페인 건이 계속
+	 * 선점·방치를 반복해 다른 캠페인이 밀린다.
+	 */
+	List<WorkflowInstance> claimBatch();
+
+	/**
+	 * 아래 결과 기록 UPDATE 5개는 모두 status = 'RUNNING' 일 때만 먹고(실행 중 캠페인 종료·고객 삭제로 CANCELLED 가 됐거나, 10분 복구 뒤
+	 * 다른 워커가 처리한 건을 늦은 워커가 덮어쓰지 못하게, PR #35 리뷰 🟡3) 바뀐 행 수를 돌려준다 — 0 이면 호출한 쪽이 경고를 남긴다.
+	 * 성공해서 다음 단계로 넘어가면(moveToWait*, complete) 재시도 횟수·오류를 비운다 — 서로 다른 단계의 일시 오류가 누적되지 않게.
+	 */
+	/** WAIT 도달, 직전 SEND 가 PENDING(발송 큐로 들어감): next_run_at 을 비워 wake() 를 기다린다(워크플로우 Plan 3.1) */
+	int moveToWaitPending(@Param("instanceId") long instanceId, @Param("nextStepId") long nextStepId);
+
+	/** WAIT 도달, 그 외 경우(직전 SEND 가 SKIPPED 였거나 SEND 가 아니었음): 대기 시각을 바로 계산해 기록한다 */
+	int moveToWait(@Param("instanceId") long instanceId, @Param("nextStepId") long nextStepId,
+		@Param("nextRunAt") OffsetDateTime nextRunAt);
+
+	/** END 도달: current_step_id 는 그대로 두고 상태만 COMPLETED 로 바꾼다(워크플로우 Plan 3장) */
+	int complete(@Param("instanceId") long instanceId);
+
+	/** 노드 실행 오류(tx2 롤백 뒤 tx3): retry_count+1, 5분 뒤 재시도로 WAITING 되돌린다(워크플로우 Plan 5장) */
+	int recordRetry(@Param("instanceId") long instanceId, @Param("nextRunAt") OffsetDateTime nextRunAt,
+		@Param("errorMessage") String errorMessage);
+
+	/** 재시도 3회 초과: FAILED 로 종단한다(워크플로우 Plan 5장) */
+	int recordFailed(@Param("instanceId") long instanceId, @Param("errorMessage") String errorMessage);
+
+	/**
+	 * RUNNING 으로 10분 넘게 남은 건을 WAITING(next_run_at=now) 으로 되돌려 같은 단계부터 다시 처리하게
+	 * 한다(DB_SCHEMA 7장, 워크플로우 Plan 5장). SEND 는 uq_send_log_step 이 중복 적재를 막아 멱등하다.
+	 * @return 복구된 건수
+	 */
+	int recoverStuckRunning();
+
+	WorkflowInstance findById(@Param("instanceId") long instanceId);
+
+	/** 발송 결과가 도착해 기다리던 인스턴스의 실행 시각을 채운다. next_run_at 이 비어 있는 WAITING 만 — 이미 채워진 값은 덮어쓰지 않는다 */
+	int wake(@Param("instanceId") long instanceId, @Param("nextRunAt") OffsetDateTime nextRunAt);
+
+	/** DRAFT 캠페인 구조를 다시 저장할 때, 시작이 도중에 실패해 남은 발송 이력 없는 인스턴스를 지운다. @return 삭제된 건수 */
+	int deleteUnstartedByCampaign(@Param("campaignId") long campaignId);
+
+	/** 캠페인 수동 종료: 진행 중(WAITING·RUNNING)인 인스턴스를 CANCELLED 로 바꾼다(PRD 6.6). @return 취소된 건수 */
+	int cancelActiveByCampaign(@Param("campaignId") long campaignId);
+
+	/** 고객 삭제: 그 고객의 진행 중(WAITING·RUNNING) 인스턴스를 CANCELLED 로 바꾼다. @return 취소된 건수 */
+	int cancelActiveByCustomer(@Param("customerId") long customerId);
+
+	/** status 가 null 이면 전체. instance_id 순 */
+	List<WorkflowInstance> findByCampaign(@Param("campaignId") long campaignId,
+		@Param("status") com.withus.workflow.domain.InstanceStatus status, @Param("offset") int offset,
+		@Param("limit") int limit);
+
+	long countByCampaign(@Param("campaignId") long campaignId,
+		@Param("status") com.withus.workflow.domain.InstanceStatus status);
+
+	/**
+	 * 트리거 일괄 생성: customerIds 마다 인스턴스를 WAITING(next_run_at=now) 으로 만든다.
+	 * uq_workflow_instance(campaign_id, customer_id) 충돌은 건너뛰어 재실행해도 멱등하다(워크플로우 Plan 6.1).
+	 * @return 실제로 insert 된 건수
+	 */
+	int insertBatch(@Param("campaignId") long campaignId, @Param("stepId") long stepId,
+		@Param("customerIds") List<Long> customerIds);
+}

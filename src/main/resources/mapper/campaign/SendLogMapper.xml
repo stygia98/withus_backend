@@ -71,7 +71,7 @@
 		WHERE campaign_id = #{campaignId} AND kind = 'CAMPAIGN' AND status = 'PENDING' AND instance_id IS NULL
 	</delete>
 
-	<select id="claimBatch" resultMap="sendLogResultMap">
+	<select id="claimBatch" resultMap="sendLogResultMap" flushCache="true">
 		WITH claimed AS (
 			UPDATE send_log SET status = 'SENDING', updated_at = now()
 			WHERE send_log_id IN (
@@ -135,10 +135,21 @@
 		WHERE send_log_id = #{sendLogId} AND status = 'SENDING'
 	</update>
 
-	<update id="recoverStuckSending">
+	<select id="recoverStuckSending" resultMap="sendLogResultMap" flushCache="true">
 		UPDATE send_log SET status = 'FAILED', error_message = 'UNKNOWN_RESULT'
 		WHERE status = 'SENDING' AND updated_at &lt; now() - interval '10 minutes'
-	</update>
+		RETURNING *
+	</select>
+
+	<select id="findTerminalSendsOfWaitingInstances" resultMap="sendLogResultMap">
+		SELECT sl.* FROM workflow_instance wi
+		JOIN LATERAL (
+			SELECT * FROM send_log s WHERE s.instance_id = wi.instance_id ORDER BY s.send_log_id DESC LIMIT 1
+		) sl ON TRUE
+		WHERE wi.status = 'WAITING' AND wi.next_run_at IS NULL AND wi.updated_at &lt; now() - interval '1 minute'
+		  AND sl.status IN ('SENT', 'FAILED', 'SKIPPED', 'BOUNCED')
+		LIMIT 500
+	</select>
 
 	<select id="findPlaceholderSource" resultType="com.withus.campaign.domain.CustomerPlaceholderSource">
 		SELECT name, email, region_code, total_purchase FROM customer WHERE customer_id = #{customerId}
@@ -164,5 +175,18 @@
 	<!-- 새 캠페인을 시작하기 전, 이미 밀려 있는 대기분(캠페인 3/4 estimate) -->
 	<select id="countPending" resultType="long">
 		SELECT count(*) FROM send_log WHERE status = 'PENDING'
+	</select>
+
+	<select id="findStatusByInstanceStep" resultType="com.withus.campaign.domain.SendStatus">
+		SELECT status FROM send_log WHERE instance_id = #{instanceId} AND step_id = #{stepId}
+	</select>
+
+	<select id="findResultById" resultType="com.withus.campaign.domain.SendLog">
+		SELECT * FROM send_log WHERE send_log_id = #{sendLogId}
+	</select>
+
+	<select id="findLatestSendLogId" resultType="long">
+		SELECT send_log_id FROM send_log WHERE instance_id = #{instanceId} AND channel = #{channel}
+		ORDER BY send_log_id DESC LIMIT 1
 	</select>
 </mapper>

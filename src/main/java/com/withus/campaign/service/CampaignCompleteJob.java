@@ -1,5 +1,8 @@
 package com.withus.campaign.service;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -10,7 +13,7 @@ import com.withus.campaign.mapper.CampaignMapper;
 
 /**
  * PENDING·SENDING 이 하나도 남지 않은 일회성 캠페인을 COMPLETED 로 바꾼다(캠페인 4/4, PRD 6.7).
- * 워크플로우는 범위 밖이다 — 인스턴스가 전부 끝나야 완료되는 판정은 W3 트리거 작업이 맡는다.
+ * 워크플로우(SEGMENT_SCHEDULED)는 인스턴스가 전부 끝났을 때 완료한다.
  */
 @Component
 public class CampaignCompleteJob {
@@ -37,7 +40,9 @@ public class CampaignCompleteJob {
 	/** @return COMPLETED 로 바뀐 건수 */
 	public int completeFinished() {
 		int completed = 0;
-		for (long campaignId : campaignMapper.findCompletable()) {
+		List<Long> finished = new ArrayList<>(campaignMapper.findCompletable());
+		finished.addAll(campaignMapper.findCompletableWorkflow());
+		for (long campaignId : finished) {
 			try {
 				completed += campaignMapper.complete(campaignId);
 			} catch (RuntimeException e) {

@@ -13,6 +13,10 @@
 		ORDER BY step_id
 	</select>
 
+	<select id="findById" resultType="com.withus.workflow.domain.WorkflowStep">
+		SELECT <include refid="columns"/> FROM workflow_step WHERE step_id = #{stepId}
+	</select>
+
 	<insert id="insertBatch" useGeneratedKeys="true" keyProperty="stepId">
 		INSERT INTO workflow_step (campaign_id, node_type, config_json, depth)
 		VALUES

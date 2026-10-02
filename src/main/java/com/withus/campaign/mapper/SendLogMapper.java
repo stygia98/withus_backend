@@ -9,6 +9,7 @@ import org.apache.ibatis.annotations.Param;
 import com.withus.campaign.domain.CustomerPlaceholderSource;
 import com.withus.campaign.domain.CustomerRecipient;
 import com.withus.campaign.domain.SendLog;
+import com.withus.campaign.domain.SendStatus;
 import com.withus.common.domain.Channel;
 
 @Mapper
@@ -75,12 +76,23 @@ public interface SendLogMapper {
 
 	/**
 	 * SENDING 으로 10분 넘게 남은 건을 FAILED(UNKNOWN_RESULT) 로 되돌린다(재발송하지 않음, DB_SCHEMA 7장).
-	 * @return 복구된 건수
+	 * 워크플로우 발송 건을 기다리던 인스턴스를 깨울 수 있게 바뀐 행을 돌려준다(PR #35 리뷰 🔴1)
+	 * @return 복구된 행
 	 */
-	int recoverStuckSending();
+	List<SendLog> recoverStuckSending();
+
+	/**
+	 * 워크플로우 인스턴스가 WAITING·next_run_at NULL(발송 결과 대기)인데 그 인스턴스의 가장 최근 발송 건이 이미 끝난(SENT·FAILED·
+	 * SKIPPED·BOUNCED) 경우의 그 발송 건 — wake() 가 빠졌거나 실패한 인스턴스를 찾는 보정용. updated_at 이 1분 이상 지난 것만
+	 * (방금 기록하고 곧 깨울 건은 건드리지 않는다)
+	 */
+	List<SendLog> findTerminalSendsOfWaitingInstances();
 
 	/** 렌더링용 치환 값 원본(customer SELECT) — MessageComposer 가 PlaceholderRenderer 에 넘길 Map 을 만든다 */
 	CustomerPlaceholderSource findPlaceholderSource(@Param("customerId") long customerId);
+
+	/** 결과 기록 직후의 최신 행(status·sent_at) — WorkflowWakeup 이 쓴다 */
+	SendLog findResultById(@Param("sendLogId") long sendLogId);
 
 	/** 일회성 캠페인에 연결된 쿠폰 ID (없으면 null) */
 	Long findCouponIdByCampaignId(@Param("campaignId") long campaignId);
@@ -100,4 +112,17 @@ public interface SendLogMapper {
 
 	/** 전체 PENDING 대기 건수 — 새 캠페인 시작 전 예상 소요 시간 계산용(캠페인 3/4 estimate) */
 	long countPending();
+
+	/**
+	 * 워크플로우 엔진의 WAIT 처리용(workflow-plan.md 3장) — 방금 enqueueWorkflowStep 으로 적재한 건의
+	 * 상태(PENDING/SKIPPED)를 읽어온다. 해당 채널에 수신처가 없어 아예 적재되지 않았으면 null.
+	 */
+	SendStatus findStatusByInstanceStep(@Param("instanceId") long instanceId, @Param("stepId") long stepId);
+
+	/**
+	 * 워크플로우 CONDITION(EMAIL_OPENED/CLICKED)용 — 이 인스턴스의 가장 최근 EMAIL 발송 건
+	 * (PRD 6.3 "직전 메일", workflow-plan.md 3.2 PL 리뷰 R3: 채널을 지정해야 SMS 가 섞인 구조에서
+	 * 엉뚱한 건을 집지 않는다). 아직 메일을 보낸 적이 없으면 null
+	 */
+	Long findLatestSendLogId(@Param("instanceId") long instanceId, @Param("channel") Channel channel);
 }

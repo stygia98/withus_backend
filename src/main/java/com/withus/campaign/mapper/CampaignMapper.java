@@ -21,6 +21,9 @@ public interface CampaignMapper {
 
 	Campaign findById(long campaignId);
 
+	/** 신규 가입 트리거(CUSTOMER_REGISTERED) 워크플로우 중 실행 중(ACTIVE)인 캠페인 */
+	List<Campaign> findActiveCustomerRegistered();
+
 	void insert(Campaign campaign);
 
 	/** DRAFT 일 때만 바뀐다(수정 요청이 시작 요청과 겹쳐도 실행 중인 캠페인의 참조가 바뀌지 않게, PR #31 리뷰). @return 바뀐 행 수 */
@@ -57,6 +60,16 @@ public interface CampaignMapper {
 	 */
 	List<Long> findCompletable();
 
+	/**
+	 * 워크플로우 자동 완료 대상: SEGMENT_SCHEDULED 이고 ACTIVE 인데 인스턴스가 있으며 WAITING·RUNNING 이 없는 캠페인
+	 * (COMPLETED·FAILED·CANCELLED 만 남음 — FAILED 도 끝난 것으로 본다, 안 그러면 한 건 실패로 영원히 ACTIVE).
+	 * 인스턴스가 하나도 없으면(시작 직후 생성 전, 빈 세그먼트) 대상이 아니다
+	 */
+	List<Long> findCompletableWorkflow();
+
 	/** ACTIVE → COMPLETED, ended_at 설정(낙관적 검사). @return 바뀐 행 수 */
 	int complete(long campaignId);
+
+	/** 수동 종료: ACTIVE·PAUSED → COMPLETED, ended_at 설정(PRD 6.7 전이표, 낙관적 검사). @return 바뀐 행 수 */
+	int completeManually(long campaignId);
 }

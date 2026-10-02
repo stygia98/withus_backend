@@ -22,6 +22,7 @@ import com.withus.campaign.mapper.SendLogMapper;
 import com.withus.campaign.mapper.TemplateMapper;
 import com.withus.campaign.service.MessageComposer;
 import com.withus.campaign.service.SendDispatcher;
+import com.withus.workflow.service.WorkflowWakeup;
 import com.withus.campaign.service.messaging.MessageSenderRouter;
 import com.withus.campaign.service.messaging.OutboundMessage;
 import com.withus.campaign.service.messaging.SendResult;
@@ -52,7 +53,7 @@ class SendDispatcherFailureIsolationTest {
 		composer = mock(MessageComposer.class);
 		UnsubscribeTokens tokens = mock(UnsubscribeTokens.class);
 		when(tokens.issue(anyLong(), anyLong())).thenReturn("token");
-		dispatcher = new SendDispatcher(sendLogMapper, templateMapper, router, consentService, composer, tokens, 1000,
+		dispatcher = new SendDispatcher(sendLogMapper, templateMapper, router, consentService, composer, tokens, mock(WorkflowWakeup.class), 1000,
 			"08:00", "20:50", "https://withus.local", false);
 
 		Template template = new Template();

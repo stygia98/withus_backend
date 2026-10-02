@@ -40,7 +40,9 @@ class CampaignStartOrderTest {
 	SendQueueService sendQueueService = mock(SendQueueService.class);
 	SendLogMapper sendLogMapper = mock(SendLogMapper.class);
 	CampaignService service = new CampaignService(campaignMapper, templateMapper, sendLogMapper,
-		segmentService, sendQueueService, "08:00", "20:50", 14);
+		segmentService, sendQueueService, mock(com.withus.workflow.service.WorkflowTriggerService.class),
+		mock(com.withus.workflow.mapper.WorkflowInstanceMapper.class), mock(com.withus.workflow.mapper.WorkflowStepMapper.class),
+		"08:00", "20:50", 14);
 
 	private Campaign campaign(CampaignStatus status) {
 		Campaign campaign = new Campaign();
