@@ -98,10 +98,11 @@ class WorkflowInstanceMapperConcurrencyTest {
 			Future<List<WorkflowInstance>> first = executor.submit(workflowInstanceMapper::claimBatch);
 			Future<List<WorkflowInstance>> second = executor.submit(workflowInstanceMapper::claimBatch);
 
-			List<Long> firstIds = idsOf(first.get());
-			List<Long> secondIds = idsOf(second.get());
+			// 이 테스트의 캠페인 건만 본다. 한 스레드가 먼저 다 가져가면 다른 쪽은 빈 목록일 수 있다(그래도 겹치지만 않으면 정상)
+			List<Long> firstIds = idsOf(first.get().stream().filter(i -> i.getCampaignId() == campaignId).toList());
+			List<Long> secondIds = idsOf(second.get().stream().filter(i -> i.getCampaignId() == campaignId).toList());
 
-			assertThat(firstIds).as("두 스레드가 겹치는 행이 없어야 한다").doesNotContainAnyElementsOf(secondIds);
+			assertThat(firstIds.stream().filter(secondIds::contains).toList()).as("두 스레드가 겹치는 행이 없어야 한다").isEmpty();
 			assertThat(firstIds.size() + secondIds.size()).isEqualTo(80);
 			Long runningCount = jdbc.queryForObject(
 				"SELECT count(*) FROM workflow_instance WHERE campaign_id = ? AND status = 'RUNNING'", Long.class,

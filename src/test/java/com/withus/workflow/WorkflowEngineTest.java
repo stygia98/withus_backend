@@ -145,11 +145,13 @@ class WorkflowEngineTest {
 				assertThat(instanceStatus(instance.getInstanceId())).isEqualTo("WAITING");
 				assertThat(instanceRetryCount(instance.getInstanceId())).isEqualTo(attempt);
 				instance = refetch(instance); // 다음 번 선점을 흉내 낸다 — 늘어난 retry_count 를 반영해 다시 불러온다
+				jdbc.update("UPDATE workflow_instance SET status = 'RUNNING' WHERE instance_id = ?", instance.getInstanceId());
 			}
 		}
 
 		assertThat(instanceStatus(instance.getInstanceId())).isEqualTo("FAILED");
-		assertThat(instanceRetryCount(instance.getInstanceId())).isEqualTo(3);
+		// PRD 6.5-5 "3회 실패하면 FAILED"(PL 결정): 1·2번째 실패는 재시도(retry_count 1, 2), 3번째 실패에서 FAILED — 재시도 횟수는 2에서 멈춘다
+		assertThat(instanceRetryCount(instance.getInstanceId())).isEqualTo(2);
 	}
 
 	private String instanceStatus(long instanceId) {

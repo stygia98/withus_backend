@@ -142,6 +142,8 @@ class Workflow64ExampleIntegrationTest {
 	@Test
 	void 미클릭_고객은_SMS_리마인드를_받는다() {
 		long customerId = newCustomer();
+		// SMS 는 휴대폰 번호와 SMS 수신동의가 있어야 발송 대상이다 — 없으면 적재에서 빠져 send_log 가 생기지 않는다
+		jdbc.update("UPDATE customer SET phone = '01012345678', sms_consent_yn = 'Y' WHERE customer_id = ?", customerId);
 		long instanceId = jdbc.queryForObject("""
 			INSERT INTO workflow_instance (campaign_id, customer_id, current_step_id, status, next_run_at)
 			VALUES (?, ?, ?, 'RUNNING', NULL) RETURNING instance_id

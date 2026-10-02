@@ -3,7 +3,8 @@
 <mapper namespace="com.withus.workflow.mapper.WorkflowInstanceMapper">
 
 	<!-- UPDATE ... RETURNING 은 select 로 선언해야 ResultSet 을 받는다 (발송 큐 claimBatch 와 같은 관용 패턴) -->
-	<select id="claimBatch" resultType="com.withus.workflow.domain.WorkflowInstance">
+	<!-- flushCache: 같은 SqlSession(@Transactional)에서 다시 부르면 1차 캐시가 첫 결과를 돌려줘 선점이 되지 않은 것처럼 보인다 -->
+	<select id="claimBatch" resultType="com.withus.workflow.domain.WorkflowInstance" flushCache="true">
 		UPDATE workflow_instance SET status = 'RUNNING', updated_at = now()
 		WHERE instance_id IN (
 			SELECT instance_id FROM workflow_instance wi

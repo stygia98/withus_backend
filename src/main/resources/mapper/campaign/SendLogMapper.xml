@@ -71,7 +71,7 @@
 		WHERE campaign_id = #{campaignId} AND kind = 'CAMPAIGN' AND status = 'PENDING' AND instance_id IS NULL
 	</delete>
 
-	<select id="claimBatch" resultMap="sendLogResultMap">
+	<select id="claimBatch" resultMap="sendLogResultMap" flushCache="true">
 		WITH claimed AS (
 			UPDATE send_log SET status = 'SENDING', updated_at = now()
 			WHERE send_log_id IN (
@@ -135,7 +135,7 @@
 		WHERE send_log_id = #{sendLogId} AND status = 'SENDING'
 	</update>
 
-	<select id="recoverStuckSending" resultMap="sendLogResultMap">
+	<select id="recoverStuckSending" resultMap="sendLogResultMap" flushCache="true">
 		UPDATE send_log SET status = 'FAILED', error_message = 'UNKNOWN_RESULT'
 		WHERE status = 'SENDING' AND updated_at &lt; now() - interval '10 minutes'
 		RETURNING *
