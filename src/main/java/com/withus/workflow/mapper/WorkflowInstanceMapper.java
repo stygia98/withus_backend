@@ -53,6 +53,9 @@ public interface WorkflowInstanceMapper {
 	 * uq_workflow_instance(campaign_id, customer_id) 충돌은 건너뛰어 재실행해도 멱등하다(워크플로우 Plan 6.1).
 	 * @return 실제로 insert 된 건수
 	 */
+	/** 캠페인 수동 종료: 진행 중(WAITING·RUNNING)인 인스턴스를 CANCELLED 로 바꾼다(PRD 6.6). @return 취소된 건수 */
+	int cancelActiveByCampaign(@Param("campaignId") long campaignId);
+
 	int insertBatch(@Param("campaignId") long campaignId, @Param("stepId") long stepId,
 		@Param("customerIds") List<Long> customerIds);
 }

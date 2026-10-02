@@ -62,4 +62,7 @@ public interface CampaignMapper {
 
 	/** ACTIVE → COMPLETED, ended_at 설정(낙관적 검사). @return 바뀐 행 수 */
 	int complete(long campaignId);
+
+	/** 수동 종료: ACTIVE·PAUSED → COMPLETED, ended_at 설정(PRD 6.7 전이표, 낙관적 검사). @return 바뀐 행 수 */
+	int completeManually(long campaignId);
 }

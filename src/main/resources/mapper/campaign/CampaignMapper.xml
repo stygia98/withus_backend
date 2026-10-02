@@ -96,4 +96,9 @@
 		UPDATE campaign SET status = 'COMPLETED', ended_at = now(), updated_at = now()
 		WHERE campaign_id = #{campaignId} AND status = 'ACTIVE'
 	</update>
+
+	<update id="completeManually">
+		UPDATE campaign SET status = 'COMPLETED', ended_at = now(), updated_at = now()
+		WHERE campaign_id = #{campaignId} AND status IN ('ACTIVE', 'PAUSED')
+	</update>
 </mapper>

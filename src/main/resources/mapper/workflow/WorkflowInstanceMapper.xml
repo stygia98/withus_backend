@@ -60,6 +60,11 @@
 		WHERE instance_id = #{instanceId} AND status = 'WAITING' AND next_run_at IS NULL
 	</update>
 
+	<update id="cancelActiveByCampaign">
+		UPDATE workflow_instance SET status = 'CANCELLED', updated_at = now()
+		WHERE campaign_id = #{campaignId} AND status IN ('WAITING', 'RUNNING')
+	</update>
+
 	<insert id="insertBatch">
 		INSERT INTO workflow_instance (campaign_id, customer_id, current_step_id, status, next_run_at)
 		SELECT #{campaignId}, c.customer_id, #{stepId}, 'WAITING', now()

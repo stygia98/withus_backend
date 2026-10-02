@@ -114,4 +114,25 @@ public class CampaignController {
 		Campaign campaign = campaignService.start(campaignId);
 		return ApiResponse.ok(CampaignResponse.from(campaign));
 	}
+
+	@Operation(summary = "일시정지", description = "ACTIVE → PAUSED. 인스턴스 실행과 PENDING 발송이 멈춘다. 그 외 상태면 CAMPAIGN_INVALID_STATUS(409).")
+	@PreAuthorize("hasAnyRole('OWNER','MANAGER')")
+	@PostMapping("/{campaignId}/pause")
+	public ApiResponse<CampaignResponse> pause(@PathVariable long campaignId) {
+		return ApiResponse.ok(CampaignResponse.from(campaignService.pause(campaignId)));
+	}
+
+	@Operation(summary = "재개", description = "PAUSED → ACTIVE. 그 외 상태면 CAMPAIGN_INVALID_STATUS(409).")
+	@PreAuthorize("hasAnyRole('OWNER','MANAGER')")
+	@PostMapping("/{campaignId}/resume")
+	public ApiResponse<CampaignResponse> resume(@PathVariable long campaignId) {
+		return ApiResponse.ok(CampaignResponse.from(campaignService.resume(campaignId)));
+	}
+
+	@Operation(summary = "종료", description = "ACTIVE·PAUSED → COMPLETED. 진행 중 인스턴스는 CANCELLED. 그 외 상태면 CAMPAIGN_INVALID_STATUS(409).")
+	@PreAuthorize("hasAnyRole('OWNER','MANAGER')")
+	@PostMapping("/{campaignId}/complete")
+	public ApiResponse<CampaignResponse> complete(@PathVariable long campaignId) {
+		return ApiResponse.ok(CampaignResponse.from(campaignService.complete(campaignId)));
+	}
 }

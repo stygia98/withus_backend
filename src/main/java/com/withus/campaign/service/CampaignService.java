@@ -10,6 +10,7 @@ import java.util.regex.Pattern;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.withus.campaign.domain.Campaign;
 import com.withus.campaign.domain.CampaignErrorCode;
@@ -27,6 +28,7 @@ import com.withus.common.exception.CommonErrorCode;
 import com.withus.common.response.PageResponse;
 import com.withus.coupon.domain.CouponErrorCode;
 import com.withus.segment.service.SegmentService;
+import com.withus.workflow.mapper.WorkflowInstanceMapper;
 import com.withus.workflow.service.WorkflowTriggerService;
 
 /**
@@ -50,12 +52,14 @@ public class CampaignService {
 	private final SegmentService segmentService;
 	private final SendQueueService sendQueueService;
 	private final WorkflowTriggerService workflowTriggerService;
+	private final WorkflowInstanceMapper workflowInstanceMapper;
 	private final SendWindow sendWindow;
 	private final int maxSendRate;
 	private Clock clock = Clock.system(ZoneId.of("Asia/Seoul"));
 
 	public CampaignService(CampaignMapper campaignMapper, TemplateMapper templateMapper, SendLogMapper sendLogMapper,
 			SegmentService segmentService, SendQueueService sendQueueService, WorkflowTriggerService workflowTriggerService,
+			WorkflowInstanceMapper workflowInstanceMapper,
 			@Value("${withus.send-window.start}") String sendWindowStart,
 			@Value("${withus.send-window.end}") String sendWindowEnd,
 			@Value("${ses.max-send-rate}") int maxSendRate) {
@@ -65,6 +69,7 @@ public class CampaignService {
 		this.segmentService = segmentService;
 		this.sendQueueService = sendQueueService;
 		this.workflowTriggerService = workflowTriggerService;
+		this.workflowInstanceMapper = workflowInstanceMapper;
 		this.sendWindow = new SendWindow(LocalTime.parse(sendWindowStart), LocalTime.parse(sendWindowEnd));
 		this.maxSendRate = maxSendRate;
 	}
@@ -225,6 +230,41 @@ public class CampaignService {
 			workflowTriggerService.startSegmentScheduled(campaignId);
 		}
 		campaign.setStatus(CampaignStatus.ACTIVE);
+		return campaign;
+	}
+
+	/** ACTIVE → PAUSED. 일시정지 중에는 인스턴스 실행과 PENDING 발송이 멈춘다(PRD 6.6) */
+	public Campaign pause(long campaignId) {
+		return transition(campaignId, CampaignStatus.ACTIVE, CampaignStatus.PAUSED, "ACTIVE 상태의 캠페인만 일시정지할 수 있습니다.");
+	}
+
+	/** PAUSED → ACTIVE. 밀린 건은 다음 주기에 선점돼 바로 처리된다(광고성 시간 제한은 그대로) */
+	public Campaign resume(long campaignId) {
+		return transition(campaignId, CampaignStatus.PAUSED, CampaignStatus.ACTIVE, "PAUSED 상태의 캠페인만 재개할 수 있습니다.");
+	}
+
+	/**
+	 * ACTIVE·PAUSED → COMPLETED. 진행 중 인스턴스는 같은 트랜잭션에서 CANCELLED 로 바꾼다(PRD 6.6).
+	 * 이미 적재된 PENDING 발송은 발송 직전 재확인에서 SKIPPED(CAMPAIGN_COMPLETED)가 된다
+	 */
+	@Transactional
+	public Campaign complete(long campaignId) {
+		Campaign campaign = getOrThrow(campaignId);
+		if (campaignMapper.completeManually(campaignId) == 0) {
+			throw new BusinessException(CampaignErrorCode.CAMPAIGN_INVALID_STATUS,
+				"ACTIVE·PAUSED 상태의 캠페인만 종료할 수 있습니다.", null);
+		}
+		workflowInstanceMapper.cancelActiveByCampaign(campaignId);
+		campaign.setStatus(CampaignStatus.COMPLETED);
+		return campaign;
+	}
+
+	private Campaign transition(long campaignId, CampaignStatus from, CampaignStatus to, String message) {
+		Campaign campaign = getOrThrow(campaignId);
+		if (campaignMapper.updateStatus(campaignId, from, to) == 0) {
+			throw new BusinessException(CampaignErrorCode.CAMPAIGN_INVALID_STATUS, message, null);
+		}
+		campaign.setStatus(to);
 		return campaign;
 	}
 
