@@ -1,10 +1,10 @@
 # 워크플로우 엔진 설계 Plan
 
 - 작성자: 팀원2 (campaign·workflow)
-- 상태: **PL 승인 대기**
+- 상태: **PL 승인 완료** (backend PR #20) — **구현 전 맨 아래 "11. PL 승인 결과"를 먼저 읽는다.** 1~8장과 11장이 다르면 11장을 따른다
 - 근거: PRD 6장(워크플로우 엔진 명세)·8.2(발송 큐 연동)·10.1(연결 인터페이스)·10.3(완료 기준), DB_SCHEMA 5.2(config_json)·6장(상태 전이)·7장(쿼리 패턴), API_SPEC 6장(캠페인·워크플로우)
 
-> 이 Plan은 코드 작성 전 PL 승인을 받기 위한 문서다(CLAUDE.md "워크플로우 엔진은 코드를 쓰기 전에 Plan을 먼저 제시하고 승인받는다"). W3 구현(구조 검증·엔진·트리거·상태 전이)은 이 Plan 승인 이후 시작한다. 발송 큐 Plan(`send-queue-plan.md`, 승인 완료)과 겹치는 송신 로직(발송 직전 재확인·렌더링·재시도)은 다시 다루지 않고 연결점만 명시한다.
+> 이 Plan은 코드 작성 전 PL 승인을 받기 위한 문서다(CLAUDE.md "워크플로우 엔진은 코드를 쓰기 전에 Plan을 먼저 제시하고 승인받는다"). W3 구현(구조 검증·엔진·트리거·상태 전이)은 이 Plan 승인 이후 시작한다. 발송 큐 Plan(`send-queue-plan.md`, 승인 완료)과 겹치는 송신 로직(발송 직전 재확인·렌더링·재시도)은 다시 다루지 않고 연결점만 명시한다. 아래 1~8장은 PL 리뷰(11장 R1~R4)를 반영해 수정한 최종본이다.
 
 ## 1. workflow_instance 상태 전이
 
@@ -69,25 +69,26 @@ RETURNING *;
 | 노드 | 동작 | current_step_id 갱신 | 루프 계속 여부 |
 |---|---|---|---|
 | TRIGGER | 인스턴스 생성 시 1회만 의미 있음(6장) | 생성 시 `nextStepId`로 건너뜀 | - |
-| SEND_EMAIL / SEND_SMS | `SendQueueService.enqueueWorkflowStep(campaignId, instanceId, stepId, customerId, channel)` 호출(내부에서 수신동의 확인 후 PENDING/SKIPPED 적재, PRD 6.5-3) | `nextStepId` | 계속 |
+| SEND_EMAIL / SEND_SMS | `SendQueueService.enqueueWorkflowStep(...)` 호출 뒤 `SendLogMapper.findStatusByInstanceStep(instanceId, stepId)`로 방금 적재된 상태(PENDING/SKIPPED)를 읽어온다(PRD 6.5-3) — WAIT 처리(3.1)에서 쓴다 | `nextStepId` | 계속 |
 | WAIT | 3.1 참고 | `nextStepId`(WAIT 자신을 건너뜀) | 멈춤(이 인스턴스 처리 종료) |
 | CONDITION | `TrackEventRepository.existsHumanEvent` 또는 누적구매액 비교(3.2) | `yesStepId`/`noStepId` | 계속 |
 | END | `status = COMPLETED` | 변경 없음 | 멈춤 |
 
 ### 3.1 WAIT 처리 (PRD 6.5-4)
 
-직전에 실행한 노드가 SEND_EMAIL/SEND_SMS였는지(`justSent` 플래그, 같은 루프 안에서만 유효)에 따라 둘로 나뉜다.
+직전에 실행한 노드가 SEND_EMAIL/SEND_SMS였는지, 그리고 그 적재 결과가 `PENDING`이었는지에 따라 셋으로 나뉜다.
 
 | 직전 노드 | next_run_at | 비고 |
 |---|---|---|
-| SEND(방금 적재, 결과 미확정) | `NULL` | "발송 결과를 기다리는 중" — 4장 `wake()`가 채운다 |
+| SEND, 적재 결과 `PENDING`(발송 큐로 들어감) | `NULL` | "발송 결과를 기다리는 중" — 4장 `wake()`가 채운다 |
+| SEND, 적재 결과 `SKIPPED`(수신동의 거부 등으로 적재 시점에 이미 종료) | `now + 대기시간` | `wake()`가 절대 오지 않으므로(claimBatch가 PENDING만 선점) 즉시 계산해야 한다 — 안 그러면 인스턴스가 영원히 멈춘다(PL 리뷰 R2) |
 | 그 외(CONDITION, 또는 WAIT가 TRIGGER 바로 다음 등) | `now + 대기시간` | 즉시 계산 가능 |
 
-두 경우 모두 `current_step_id = WAIT.nextStepId`(WAIT를 건너뛴 값), `status = WAITING`으로 저장하고 그 인스턴스 처리를 멈춘다.
+세 경우 모두 `current_step_id = WAIT.nextStepId`(WAIT를 건너뛴 값), `status = WAITING`으로 저장하고 그 인스턴스 처리를 멈춘다.
 
 ### 3.2 CONDITION 판정
 
-- `EMAIL_OPENED`/`EMAIL_CLICKED`: 구조 검증(워크플로우 구조 2/3 작업)이 "이 조건 앞에는 반드시 SEND_EMAIL→WAIT가 있다"를 보장하므로, **이 인스턴스의 가장 최근 send_log 1건**(`SendLogMapper`에 `findLatestSendLogId(instanceId)` 신규 메서드 필요)을 가져와 `TrackEventRepository.existsHumanEvent(sendLogId, "OPEN"|"CLICK")`로 판정한다. SKIPPED·FAILED로 끝난 건은 `track_event`가 없으므로 자연히 `false`(NO) — PRD 6.5-4의 "SKIPPED·FAILED면 NO" 요구사항을 별도 분기 없이 만족한다.
+- `EMAIL_OPENED`/`EMAIL_CLICKED`: PRD 6.3 "이 워크플로우의 **직전 메일** 발송 건"이므로 채널을 EMAIL로 한정해 조회한다 — `SendLogMapper.findLatestSendLogId(instanceId, Channel.EMAIL)`(신규 메서드, PL 리뷰 R3: 채널 지정 없이 "가장 최근 send_log"만 보면 SMS가 섞인 구조에서 잘못된 건을 집을 수 있다)로 가장 최근 EMAIL 건을 가져와 `TrackEventRepository.existsHumanEvent(sendLogId, "OPEN"|"CLICK")`로 판정한다. SKIPPED·FAILED로 끝난 건은 `track_event`가 없으므로 자연히 `false`(NO) — PRD 6.5-4의 "SKIPPED·FAILED면 NO" 요구사항을 별도 분기 없이 만족한다.
 - `PURCHASE_GTE`: `customer.total_purchase >= config.amount`(이미 `MessageComposer`의 `findPlaceholderSource`가 쓰는 컬럼과 같다 — 같은 값을 재사용).
 
 ## 4. 발송 결과 ↔ 워크플로우 연결 (WorkflowWakeup)
@@ -109,17 +110,23 @@ public interface WorkflowWakeup {
 
 `SendDispatcher`의 결과 기록(발송 큐 Plan 3.3, tx2) 안에서 `sendLog.instanceId != null`이면 **같은 트랜잭션**으로 `wake(sendLog)`를 호출한다.
 
+**PL 리뷰 R1**: 한 패스 안에서 SEND가 여러 번 실행될 수 있다(예: `SEND_A → CONDITION → SEND_B → WAIT`, CONDITION이 `PURCHASE_GTE`처럼 메일 이벤트와 무관한 조건이면 A·B 둘 다 같은 패스에서 적재된다). 이때 인스턴스는 **B 뒤의 WAIT**만 기다리는데, A의 결과가 먼저 오면 "다음 노드가 WAIT가 아니니 `now`로 재개"해버려 B의 WAIT를 건너뛰는 버그가 있었다. 수정: 이 SEND 바로 뒤가 WAIT이고 **그 WAIT의 다음 노드가 현재 `instance.current_step_id`와 같을 때만**(= 인스턴스가 지금 정말 이 WAIT를 기다리는 중일 때만) 깨운다.
+
 ```
+instance = workflowInstanceMapper.find(sendLog.instanceId)   // current_step_id, next_run_at 조회
 sendStep = workflowStepMapper.find(sendLog.stepId)
-nextStep = workflowStepMapper.find(sendStep.nextStepId)      // current_step_id 가 이미 가리키는 바로 그 노드
-baseTime = sendLog.status == SENT ? sendLog.sentAt : now()   // SKIPPED·FAILED는 now (PRD 6.5-4)
-nextRunAt = nextStep.nodeType == WAIT ? baseTime + nextStep.config.duration : now
-UPDATE workflow_instance SET next_run_at = nextRunAt
-WHERE instance_id = sendLog.instanceId AND next_run_at IS NULL
+nextStep = workflowStepMapper.find(sendStep.nextStepId)
+if (nextStep.nodeType == WAIT && nextStep.nextStepId == instance.currentStepId) {
+    baseTime = sendLog.status == SENT ? sendLog.sentAt : now()   // SKIPPED·FAILED는 now (PRD 6.5-4)
+    nextRunAt = baseTime + nextStep.config.duration
+    UPDATE workflow_instance SET next_run_at = nextRunAt
+    WHERE instance_id = sendLog.instanceId AND next_run_at IS NULL
+}
+// 조건을 만족하지 않으면 아무것도 하지 않는다 — 이 SEND는 인스턴스가 기다리는 WAIT와 무관하다
 ```
 
+- `nextStep.nodeType != WAIT`인 경우(SEND 바로 뒤에 CONDITION 등이 오는 구조)는 **깨우지 않는다** — 그 SEND 다음은 애초에 블로킹 지점이 아니라 같은 패스 안에서 바로 처리될 노드였으므로 `wake()`가 관여할 일이 없다.
 - `WHERE next_run_at IS NULL` 조건으로, 이미 다른 경로(멈춤 복구 등)로 값이 채워진 경우 덮어쓰지 않는다.
-- `nextStep`이 WAIT가 아닌 경우(SEND 바로 뒤에 CONDITION 등이 오는 구조)는 `now`로 즉시 재개한다 — 다음 스케줄러 주기에 이어서 처리된다.
 
 ## 5. 멱등성과 멈춤 복구
 
@@ -144,9 +151,11 @@ WHERE status = 'RUNNING' AND updated_at < now() - INTERVAL '10 minutes';
 
 ### 6.2 CUSTOMER_REGISTERED
 
-- `customer` 도메인이 등록 트랜잭션 안에서 발행하는 `CustomerRegisteredEvent`를 `@EventListener`로 받는다(2026-10-01 PL 답변으로 이미 확정 — `CustomerRegisteredEvent`·`CustomerDeletedEvent` 클래스는 이미 `customer` 도메인에 존재한다).
+- `customer` 도메인이 등록 트랜잭션 안에서 발행하는 `CustomerRegisteredEvent`를 받는다(2026-10-01 PL 답변으로 이미 확정 — `CustomerRegisteredEvent`·`CustomerDeletedEvent` 클래스는 이미 `customer` 도메인에 존재한다). `CustomerDeletedEvent`(7장)와 받는 방식이 다르다(PL 리뷰 R4, 권장):
+  - `CustomerRegisteredEvent` → `@TransactionalEventListener(phase = AFTER_COMMIT)` + `@Transactional(propagation = REQUIRES_NEW)`. 등록 트랜잭션이 **커밋된 뒤**, 별도 트랜잭션에서 처리한다 — 세그먼트 평가·인스턴스 생성이 고객 등록 트랜잭션에 얹혀 롤백되거나 잠금을 오래 잡는 일을 막는다.
+  - `CustomerDeletedEvent` → Plan대로 **같은 트랜잭션**(`@EventListener`, 삭제와 함께 원자적으로 처리돼야 하므로, 7장).
 - `onCustomerRegistered(event)`: `trigger_type = CUSTOMER_REGISTERED`이고 `status = ACTIVE`인 캠페인을 찾아, 각 캠페인의 세그먼트에 이 고객이 해당하면 인스턴스 1건을 생성한다.
-- **세그먼트 멤버십 확인 방법**: `SegmentService`에는 `findTargetCustomers(segmentId)` 전체 목록만 있고 "고객 1명이 세그먼트에 속하는지"를 바로 묻는 메서드가 없다. 이 Plan에서는 `findTargetCustomers(segmentId).contains(customerId)`로 대체한다(등록은 건당 1번씩 일어나므로 대량 처리와 달리 성능 영향은 적다고 판단) — 8장 미확정 사항 1번에서 PL 확인을 구한다.
+- **세그먼트 멤버십 확인 방법(PL 승인, 11.3 Q1)**: `SegmentService`에는 `findTargetCustomers(segmentId)` 전체 목록만 있고 "고객 1명이 세그먼트에 속하는지"를 바로 묻는 메서드가 없다. `findTargetCustomers(segmentId).contains(customerId)`로 진행한다(등록은 건당 1번씩 일어나므로 대량 처리와 달리 성능 영향은 적다) — 인터페이스 변경 없음. 코드에 `// ponytail: 세그먼트 전체 조회 후 contains, 등록이 잦아지면 SegmentService.isMember 추가 검토` 주석을 남긴다.
 - 업로드로 등록된 고객은 이벤트가 발행되지 않으므로(F-01, `CustomerRegisteredEvent` 주석에 명시) 별도 필터링이 필요 없다.
 
 ## 7. 일시정지·종료·고객 삭제
@@ -157,11 +166,13 @@ WHERE status = 'RUNNING' AND updated_at < now() - INTERVAL '10 minutes';
 | 캠페인 COMPLETED(수동 종료) | `WAITING`/`RUNNING` 인스턴스를 일괄 `CANCELLED` | 캠페인 상태 전이 API(`/complete`) |
 | 고객 삭제 | `CustomerDeletedEvent`를 `@EventListener`로 받아 그 고객의 `WAITING`/`RUNNING` 인스턴스를 `CANCELLED` | workflow(이 Plan), 삭제 트랜잭션과 같은 트랜잭션(이벤트 클래스 주석에 명시) |
 
-## 8. 미확정 사항 (PL 확인 필요, 추측 구현 금지)
+## 8. 미확정 사항 — PL 답변 완료 (11.3 참고)
 
-1. **CUSTOMER_REGISTERED 세그먼트 멤버십 확인** — `SegmentService.findTargetCustomers` 전체 조회 후 `contains`로 대체(6.2). 세그먼트가 매우 크거나 등록이 잦아지면 `SegmentService.isMember(segmentId, customerId)` 같은 메서드가 필요할 수 있다 — 인터페이스 추가 여부(동결 인터페이스라 PL 리뷰 필요).
-2. **오류 재시도(5장) 대상 범위** — PRD는 "오류 발생 시"로만 명시한다. 이 Plan은 tx2(노드 연속 실행) 중 발생하는 모든 예외(DB 오류 포함)를 재시도 대상으로 본다. 비즈니스 예외(예: 설정값 오류처럼 재시도해도 같은 결과)도 같은 취급이 맞는지 PL 확인.
-3. **WAIT 대기 단위 상한** — PRD·API_SPEC에 MINUTE/HOUR/DAY 단위는 있으나 상한값 명시가 없다(예: 365일 대기 허용?). 빌더 검증(워크플로우 구조 2/3)에서 범위를 둘지 PL 확인.
+승인 전 올렸던 질문 3건은 모두 PL이 답변했다. 요약만 남기고, 정확한 답변·반영 위치는 11.3을 본다.
+
+1. **CUSTOMER_REGISTERED 세그먼트 멤버십 확인** → `contains()`로 진행, 인터페이스 변경 없음(6.2에 반영).
+2. **오류 재시도(5장) 대상 범위** → 모든 예외 재시도, 3회 후 FAILED(5장 그대로 유지, 변경 없음).
+3. **WAIT 대기 단위 상한** → 1분~90일, 빌더 검증(워크플로우 구조 2/3 작업 범위, 이 Plan에서는 값만 기록).
 
 ## 9. PRD 10.3 대응 — 워크플로우 관련 완료 기준 검증 방법
 
@@ -176,13 +187,42 @@ WHERE status = 'RUNNING' AND updated_at < now() - INTERVAL '10 minutes';
 
 ## 10. PL 승인
 
-- **승인 상태: 승인 대기.**
-- CLAUDE.md("워크플로우 엔진은 코드를 쓰기 전에 Plan을 먼저 제시하고 승인받는다")에 따라, **W3 구현(구조 검증·엔진·트리거·상태 전이)은 아래 승인 기록이 남기 전에는 시작하지 않는다.**
-- 승인 절차: 이 파일을 포함한 PR을 올리거나 PL에게 직접 공유 → 8장 미확정 사항 3건에 대한 답변을 받아 반영 → PL이 PR 코멘트 또는 메시지로 승인 → 아래에 기록.
+- **승인 상태: 승인 완료.** 승인 결과와 반영 사항은 11장에 기록했다.
+- CLAUDE.md("워크플로우 엔진은 코드를 쓰기 전에 Plan을 먼저 제시하고 승인받는다")에 따라, W3 구현(구조 검증·엔진·트리거·상태 전이)은 아래 승인 기록이 남은 뒤 시작한다.
 
 ```
-승인자:
-승인 일시:
-승인 방식(PR 코멘트 / 메시지 등):
-미확정 사항 답변: (1) CUSTOMER_REGISTERED 세그먼트 멤버십 — / (2) 재시도 대상 범위 — / (3) WAIT 대기 상한 —
+승인자: stygia98 (PL)
+승인 일시: 2026-10-01
+승인 방식: PR #20 리뷰(APPROVED)
+미확정 사항 답변: (1) CUSTOMER_REGISTERED 세그먼트 멤버십 — contains() 진행 / (2) 재시도 대상 범위 — 모든 예외, 3회 후 FAILED / (3) WAIT 대기 상한 — 1분~90일, 빌더 검증
 ```
+
+## 11. PL 승인 결과
+
+PR #20 리뷰에서 승인하며 R1~R3(꼭 반영)·R4(권장)와 8장 질문 3건에 대한 답변을 받았다. **1~8장은 이미 아래 내용을 반영해 수정한 최종본이다** — 이 11장은 무엇이, 왜 바뀌었는지 기록하는 변경 이력이다.
+
+### 11.1 꼭 반영 (반영 완료)
+
+| # | 대상 | 결정 | 이유 |
+|---|---|---|---|
+| R1 | 4.2 `wake()` | SEND 바로 뒤가 WAIT이고, 그 WAIT의 다음 노드가 `instance.current_step_id`와 같을 때만 깨운다 | `SEND_A→CONDITION→SEND_B→WAIT` 구조에서 A의 결과가 B보다 먼저 오면, 수정 전 로직은 "다음 노드가 WAIT 아님→now로 재개"를 잘못 적용해 B 뒤의 WAIT를 건너뛸 수 있었다 |
+| R2 | 3.1 WAIT 처리 | SEND 직후 WAIT는 적재 결과가 `PENDING`일 때만 `next_run_at=NULL`로 비동기 대기한다. 적재 시점에 이미 `SKIPPED`면(수신동의 거부 등) 즉시 `now+대기시간`으로 계산한다 | `SKIPPED`로 적재된 건은 `claimBatch`가 PENDING만 선점하므로 `SendDispatcher`를 거치지 않는다 → `wake()`가 영원히 오지 않아 인스턴스가 멈춘다 |
+| R3 | 3.2 CONDITION(EMAIL_OPENED/CLICKED) | `findLatestSendLogId(instanceId)`가 아니라 `findLatestSendLogId(instanceId, Channel.EMAIL)`로 채널을 지정한다 | PRD 6.3 "직전 **메일** 발송 건" — 채널 지정 없이 가장 최근 send_log만 보면 다른 채널이 섞인 구조에서 잘못된 건을 집을 수 있다 |
+
+### 11.2 권장 (반영 완료)
+
+| # | 대상 | 결정 |
+|---|---|---|
+| R4 | 6.2 CUSTOMER_REGISTERED 리스너 | `@TransactionalEventListener(phase = AFTER_COMMIT)` + `@Transactional(propagation = REQUIRES_NEW)`로 받는다(등록 트랜잭션과 분리). `CustomerDeletedEvent`는 Plan대로 같은 트랜잭션(`@EventListener`) 유지 |
+
+### 11.3 8장 질문 답변
+
+| # | 질문 | 답변 |
+|---|---|---|
+| Q1 | CUSTOMER_REGISTERED 세그먼트 멤버십 확인 방법 | `findTargetCustomers(segmentId).contains(customerId)`로 진행한다. `SegmentService` 인터페이스는 바꾸지 않는다. 코드에 ponytail 주석(등록이 잦아지면 `isMember` 추가 검토)을 남긴다(6.2 반영) |
+| Q2 | 오류 재시도(5장) 대상 범위 | 모든 예외를 재시도 대상으로 본다. 3회 실패하면 `FAILED`. 기존 5장 설계 그대로 — 변경 없음 |
+| Q3 | WAIT 대기 단위 상한 | 1분~90일. 빌더 검증(워크플로우 구조 2/3 작업)에서 범위를 강제한다 — 이 Plan은 값만 기록하고 구현은 해당 작업 범위다 |
+
+### 11.4 별도 긴급 요청(이 Plan과 무관, 기록용)
+
+PL이 같은 리뷰에서 "발송 큐(`feature/campaign-send-queue-insert`)가 dev에 PR로 없어 M2가 막혀 있다"고 알려와, PR #21로 별도로 올렸다(이 Plan 승인과는 무관한 별개 처리).
