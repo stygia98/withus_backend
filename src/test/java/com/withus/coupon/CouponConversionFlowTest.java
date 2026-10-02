@@ -21,6 +21,7 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.transaction.annotation.Transactional;
@@ -40,6 +41,9 @@ import com.withus.coupon.service.CouponService;
 @SpringBootTest
 @AutoConfigureMockMvc
 @Transactional
+// with(csrf()) 는 공유 컨텍스트의 CSRF 저장소를 바꿔 끼워, 이후 실제 /auth/csrf 쿠키를 쓰는 테스트를 깨뜨린다.
+// 실행 순서는 PC·OS 마다 다를 수 있으므로 끝나면 컨텍스트를 버린다 (docs/workflow-git.md 테스트 작성 규칙)
+@DirtiesContext
 class CouponConversionFlowTest {
 
 	private static final LocalDate TODAY = LocalDate.now(ZoneId.of("Asia/Seoul"));
