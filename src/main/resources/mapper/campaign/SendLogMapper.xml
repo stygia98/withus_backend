@@ -64,12 +64,18 @@
 		ON CONFLICT ON CONSTRAINT uq_send_log_step DO NOTHING
 	</insert>
 
-	<!-- UPDATE ... RETURNING 은 select 로 선언해야 ResultSet 을 받는다 (MyBatis+PostgreSQL 관용 패턴) -->
-	<!-- 시작 전에 적재됐다가 시작이 실패해 남은 일회성 PENDING 을 지운다. SENDING 이상·TEST·워크플로우 건은 건드리지 않는다 -->
+	<!-- 시작 전에 적재됐다가 시작이 실패해 남은 일회성 PENDING 을 지운다. 캠페인이 아직 DRAFT·SCHEDULED 일 때만, 한 번도 시도하지 않은
+	     (attempt_count = 0) 행만 지운다 — 동시에 시작된 캠페인이 ACTIVE 가 된 뒤의 재시도 대기 행(쿠폰 FK 가 걸릴 수 있음)은 건드리지 않는다.
+	     SENDING 이상·TEST·워크플로우 건도 제외 (이슈 #52) -->
 	<delete id="deleteUnstartedCampaignPending">
 		DELETE FROM send_log
 		WHERE campaign_id = #{campaignId} AND kind = 'CAMPAIGN' AND status = 'PENDING' AND instance_id IS NULL
+		  AND attempt_count = 0
+		  AND EXISTS (SELECT 1 FROM campaign c WHERE c.campaign_id = send_log.campaign_id
+		              AND c.status IN ('DRAFT', 'SCHEDULED'))
 	</delete>
+
+	<!-- UPDATE ... RETURNING 은 select 로 선언해야 ResultSet 을 받는다 (MyBatis+PostgreSQL 관용 패턴) -->
 
 	<select id="claimBatch" resultMap="sendLogResultMap">
 		WITH claimed AS (

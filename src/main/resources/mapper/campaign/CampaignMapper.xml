@@ -67,9 +67,17 @@
 		WHERE campaign_id = #{campaignId} AND status = 'SCHEDULED'
 	</update>
 
+	<!-- 시작 선점: 읽은 updated_at 과 같을 때만 새 updated_at 을 찍고 돌려준다. 동시에 시작한 요청 중 한 명만 성공한다 -->
+	<select id="claimStart" resultType="java.time.OffsetDateTime">
+		UPDATE campaign SET updated_at = clock_timestamp()
+		WHERE campaign_id = #{campaignId} AND status IN ('DRAFT', 'SCHEDULED') AND updated_at = #{expectedUpdatedAt}
+		RETURNING updated_at
+	</select>
+
+	<!-- 최종 전환: 선점 뒤에 예약 취소·수정·재예약이 끼어 updated_at 이 바뀌었으면 0행 -->
 	<update id="start">
 		UPDATE campaign SET status = 'ACTIVE', started_at = now(), updated_at = now()
-		WHERE campaign_id = #{campaignId} AND status IN ('DRAFT', 'SCHEDULED')
+		WHERE campaign_id = #{campaignId} AND status IN ('DRAFT', 'SCHEDULED') AND updated_at = #{claimedAt}
 	</update>
 
 	<select id="findDueScheduled" resultType="long">

@@ -112,4 +112,42 @@ class CampaignMapperTest {
 		assertThat(conflicting).isEqualTo(0);
 		assertThat(campaignMapper.findById(campaign.getCampaignId()).getStatus()).isEqualTo(CampaignStatus.ACTIVE);
 	}
+
+	@Test
+	void 시작_선점은_읽은_시각이_같을_때_한_번만_성공한다() {
+		Campaign campaign = newCampaign(CampaignType.ONE_TIME, CampaignStatus.DRAFT);
+		campaignMapper.insert(campaign);
+		var readAt = campaignMapper.findById(campaign.getCampaignId()).getUpdatedAt();
+
+		var claimed = campaignMapper.claimStart(campaign.getCampaignId(), readAt);
+		var second = campaignMapper.claimStart(campaign.getCampaignId(), readAt); // 동시에 시작한 다른 요청
+
+		assertThat(claimed).isNotNull().isNotEqualTo(readAt);
+		assertThat(second).as("같은 시각을 읽고 온 두 번째 요청은 선점하지 못한다").isNull();
+	}
+
+	@Test
+	void 선점_뒤에_수정이나_취소가_끼면_ACTIVE로_바뀌지_않는다() {
+		Campaign campaign = newCampaign(CampaignType.ONE_TIME, CampaignStatus.SCHEDULED);
+		campaignMapper.insert(campaign);
+		var readAt = campaignMapper.findById(campaign.getCampaignId()).getUpdatedAt();
+		var claimedAt = campaignMapper.claimStart(campaign.getCampaignId(), readAt);
+
+		// 적재 중에 사용자가 예약을 취소했다(updated_at 이 바뀐다)
+		jdbcTemplate.update("UPDATE campaign SET status = 'DRAFT', updated_at = clock_timestamp() + interval '1 second' WHERE campaign_id = ?", campaign.getCampaignId());
+
+		assertThat(campaignMapper.start(campaign.getCampaignId(), claimedAt)).isZero();
+		assertThat(campaignMapper.findById(campaign.getCampaignId()).getStatus()).isEqualTo(CampaignStatus.DRAFT);
+	}
+
+	@Test
+	void 선점_뒤에_아무도_끼지_않으면_ACTIVE가_된다() {
+		Campaign campaign = newCampaign(CampaignType.ONE_TIME, CampaignStatus.DRAFT);
+		campaignMapper.insert(campaign);
+		var readAt = campaignMapper.findById(campaign.getCampaignId()).getUpdatedAt();
+		var claimedAt = campaignMapper.claimStart(campaign.getCampaignId(), readAt);
+
+		assertThat(campaignMapper.start(campaign.getCampaignId(), claimedAt)).isEqualTo(1);
+		assertThat(campaignMapper.findById(campaign.getCampaignId()).getStatus()).isEqualTo(CampaignStatus.ACTIVE);
+	}
 }

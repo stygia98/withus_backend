@@ -11,6 +11,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
@@ -38,6 +39,10 @@ class CampaignStartOrderTest {
 	TemplateMapper templateMapper = mock(TemplateMapper.class);
 	SegmentService segmentService = mock(SegmentService.class);
 	SendQueueService sendQueueService = mock(SendQueueService.class);
+	// 읽은 시각, 시작 선점 뒤 시각 (이슈 #52 낙관적 CAS)
+	static final OffsetDateTime READ_AT = OffsetDateTime.parse("2026-10-05T09:00:00+09:00");
+	static final OffsetDateTime CLAIMED_AT = OffsetDateTime.parse("2026-10-05T09:00:05+09:00");
+
 	SendLogMapper sendLogMapper = mock(SendLogMapper.class);
 	CampaignService service = new CampaignService(campaignMapper, templateMapper, sendLogMapper,
 		segmentService, sendQueueService, "08:00", "20:50", 14);
@@ -49,7 +54,9 @@ class CampaignStartOrderTest {
 		campaign.setStatus(status);
 		campaign.setSegmentId(7L);
 		campaign.setTemplateId(3L);
+		campaign.setUpdatedAt(READ_AT);
 		when(campaignMapper.findById(1L)).thenReturn(campaign);
+		when(campaignMapper.claimStart(1L, READ_AT)).thenReturn(CLAIMED_AT);
 		return campaign;
 	}
 
@@ -65,13 +72,13 @@ class CampaignStartOrderTest {
 	void 적재가_ACTIVE_전환보다_먼저다() {
 		campaign(CampaignStatus.DRAFT);
 		template();
-		when(campaignMapper.start(1L)).thenReturn(1);
+		when(campaignMapper.start(1L, CLAIMED_AT)).thenReturn(1);
 
 		service.start(1L);
 
 		InOrder order = inOrder(sendQueueService, campaignMapper);
 		order.verify(sendQueueService).enqueueOneTime(1L, List.of(1L, 2L), Channel.EMAIL, SendKind.CAMPAIGN);
-		order.verify(campaignMapper).start(1L);
+		order.verify(campaignMapper).start(1L, CLAIMED_AT);
 	}
 
 	@Test
@@ -83,7 +90,7 @@ class CampaignStartOrderTest {
 
 		assertThatThrownBy(() -> service.start(1L)).isInstanceOf(IllegalStateException.class);
 
-		verify(campaignMapper, never()).start(anyLong());
+		verify(campaignMapper, never()).start(anyLong(), any());
 	}
 
 	@Test
@@ -99,14 +106,14 @@ class CampaignStartOrderTest {
 	void 시작할_때_적재_전에_남은_PENDING부터_지운다() {
 		campaign(CampaignStatus.DRAFT);
 		template();
-		when(campaignMapper.start(1L)).thenReturn(1);
+		when(campaignMapper.start(1L, CLAIMED_AT)).thenReturn(1);
 
 		service.start(1L);
 
 		InOrder order = inOrder(sendLogMapper, sendQueueService, campaignMapper);
 		order.verify(sendLogMapper).deleteUnstartedCampaignPending(1L);
 		order.verify(sendQueueService).enqueueOneTime(1L, List.of(1L, 2L), Channel.EMAIL, SendKind.CAMPAIGN);
-		order.verify(campaignMapper).start(1L);
+		order.verify(campaignMapper).start(1L, CLAIMED_AT);
 	}
 
 	@Test
@@ -122,5 +129,44 @@ class CampaignStartOrderTest {
 		assertThatThrownBy(() -> service.create(campaign, 1L)).isInstanceOf(BusinessException.class);
 
 		verify(campaignMapper, never()).insert(any());
+	}
+
+	@Test
+	void 선점이_가장_먼저다() {
+		campaign(CampaignStatus.DRAFT);
+		template();
+		when(campaignMapper.start(1L, CLAIMED_AT)).thenReturn(1);
+
+		service.start(1L);
+
+		InOrder order = inOrder(campaignMapper, sendLogMapper, sendQueueService);
+		order.verify(campaignMapper).claimStart(1L, READ_AT);
+		order.verify(sendLogMapper).deleteUnstartedCampaignPending(1L);
+		order.verify(sendQueueService).enqueueOneTime(1L, List.of(1L, 2L), Channel.EMAIL, SendKind.CAMPAIGN);
+		order.verify(campaignMapper).start(1L, CLAIMED_AT);
+	}
+
+	@Test
+	void 동시에_시작해_선점에_실패하면_삭제도_적재도_하지_않고_409다() {
+		campaign(CampaignStatus.DRAFT);
+		template();
+		when(campaignMapper.claimStart(1L, READ_AT)).thenReturn(null); // 다른 요청이 먼저 선점했다
+
+		assertThatThrownBy(() -> service.start(1L)).isInstanceOfSatisfying(BusinessException.class,
+			e -> assertThat(e.getErrorCode()).isEqualTo(CampaignErrorCode.CAMPAIGN_INVALID_STATUS));
+
+		verify(sendLogMapper, never()).deleteUnstartedCampaignPending(anyLong());
+		verify(sendQueueService, never()).enqueueOneTime(anyLong(), anyList(), any(), any());
+		verify(campaignMapper, never()).start(anyLong(), any());
+	}
+
+	@Test
+	void 적재_중_예약_취소나_수정이_끼면_최종_전환이_막혀_409다() {
+		campaign(CampaignStatus.SCHEDULED);
+		template();
+		when(campaignMapper.start(1L, CLAIMED_AT)).thenReturn(0); // updated_at 이 바뀌어 0행
+
+		assertThatThrownBy(() -> service.start(1L)).isInstanceOfSatisfying(BusinessException.class,
+			e -> assertThat(e.getErrorCode()).isEqualTo(CampaignErrorCode.CAMPAIGN_INVALID_STATUS));
 	}
 }

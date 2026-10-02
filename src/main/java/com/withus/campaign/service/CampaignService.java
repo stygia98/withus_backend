@@ -225,6 +225,13 @@ public class CampaignService {
 			throw new BusinessException(CampaignErrorCode.CAMPAIGN_INVALID_STATUS,
 				"DRAFT·SCHEDULED 상태의 캠페인만 시작할 수 있습니다.", null);
 		}
+		// 선점: 같은 캠페인을 동시에 시작하는 요청 중 한 명만 통과한다(스케줄러 + 사용자 '지금 시작'). 이후 예약 취소·수정이 끼면
+		// updated_at 이 바뀌어 마지막 전환이 막힌다 — 적재(수 초~분) 동안 락을 쥐지 않고도 옛 데이터로 ACTIVE 가 되는 걸 막는다(이슈 #52)
+		OffsetDateTime claimedAt = campaignMapper.claimStart(campaignId, campaign.getUpdatedAt());
+		if (claimedAt == null) {
+			throw new BusinessException(CampaignErrorCode.CAMPAIGN_INVALID_STATUS,
+				"다른 요청이 이 캠페인을 시작·수정하고 있습니다. 잠시 뒤 다시 시도하세요.", null);
+		}
 		OffsetDateTime now = OffsetDateTime.now(clock);
 		if (campaign.getType() == CampaignType.ONE_TIME) {
 			checkSendWindowAndCoupon(campaign, now);
@@ -239,9 +246,9 @@ public class CampaignService {
 			List<Long> targetIds = segmentService.findTargetCustomers(campaign.getSegmentId());
 			sendQueueService.enqueueOneTime(campaignId, targetIds, template.getChannel(), SendKind.CAMPAIGN);
 		}
-		if (campaignMapper.start(campaignId) == 0) {
+		if (campaignMapper.start(campaignId, claimedAt) == 0) {
 			throw new BusinessException(CampaignErrorCode.CAMPAIGN_INVALID_STATUS,
-				"DRAFT·SCHEDULED 상태의 캠페인만 시작할 수 있습니다.", null);
+				"시작하는 동안 캠페인이 수정되거나 예약이 취소되어 시작하지 않았습니다. 내용을 확인하고 다시 시작하세요.", null);
 		}
 		campaign.setStatus(CampaignStatus.ACTIVE);
 		return campaign;

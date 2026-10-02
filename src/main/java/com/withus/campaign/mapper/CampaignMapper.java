@@ -45,8 +45,18 @@ public interface CampaignMapper {
 	/** SCHEDULED → DRAFT, scheduled_at 해제(낙관적 검사). @return 바뀐 행 수 */
 	int cancelSchedule(long campaignId);
 
-	/** DRAFT·SCHEDULED → ACTIVE, started_at 설정(낙관적 검사). @return 바뀐 행 수 */
-	int start(long campaignId);
+	/**
+	 * 시작 선점(PR #31 재리뷰, 이슈 #52): DRAFT·SCHEDULED 이고 updated_at 이 expectedUpdatedAt 일 때만 updated_at 을 새로 찍고
+	 * 그 값을 돌려준다. 이미 다른 요청이 선점했거나 상태가 바뀌었으면 null
+	 */
+	OffsetDateTime claimStart(@Param("campaignId") long campaignId,
+		@Param("expectedUpdatedAt") OffsetDateTime expectedUpdatedAt);
+
+	/**
+	 * DRAFT·SCHEDULED → ACTIVE, started_at 설정(낙관적 검사). 선점(claimStart) 이후 수정·예약 취소가 끼어 updated_at 이 바뀌었으면
+	 * 바뀌지 않는다. @return 바뀐 행 수
+	 */
+	int start(@Param("campaignId") long campaignId, @Param("claimedAt") OffsetDateTime claimedAt);
 
 	/** 예약 시각이 지난 SCHEDULED 캠페인 ID 목록(캠페인 4/4) */
 	List<Long> findDueScheduled();

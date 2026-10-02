@@ -344,4 +344,20 @@ class SendLogMapperTest {
 	void 없는_쿠폰의_유효기간_확인은_null이다() {
 		assertThat(sendLogMapper.isCouponValid(-1L)).isNull();
 	}
+
+	@Test
+	void ACTIVE가_된_캠페인의_PENDING은_고아_삭제에서_지워지지_않는다() {
+		long campaignId = newOneTimeCampaign(newSegment());
+		long retryCustomerId = newCustomer();
+		sendLogMapper.insertOneTimeBatch(List.of(oneTimeLog(campaignId, customerId), oneTimeLog(campaignId, retryCustomerId)));
+		jdbcTemplate.update("UPDATE send_log SET attempt_count = 1 WHERE campaign_id = ? AND customer_id = ?",
+			campaignId, retryCustomerId);
+
+		jdbcTemplate.update("UPDATE campaign SET status = 'ACTIVE' WHERE campaign_id = ?", campaignId);
+		assertThat(sendLogMapper.deleteUnstartedCampaignPending(campaignId)).as("ACTIVE 면 아무것도 지우지 않는다").isZero();
+
+		jdbcTemplate.update("UPDATE campaign SET status = 'DRAFT' WHERE campaign_id = ?", campaignId);
+		assertThat(sendLogMapper.deleteUnstartedCampaignPending(campaignId))
+			.as("DRAFT 여도 이미 시도한(attempt_count > 0) 행은 남긴다").isEqualTo(1);
+	}
 }
