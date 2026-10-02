@@ -2,6 +2,7 @@ package com.withus.tracking.service;
 
 import java.time.Duration;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Locale;
 
 import org.springframework.stereotype.Component;
@@ -22,42 +23,29 @@ public class BotDetector {
 	}
 
 	/**
-	 * 규칙 2: 알려진 보안 스캐너·봇 User-Agent. 키워드는 대소문자를 무시하되 <b>단어 끝</b>에 올 때만 맞는 것으로 본다.
-	 * <ul>
-	 * <li>맞음: Googlebot, bingbot, AhrefsBot, Slackbot-LinkExpanding, SecurityScanner/1.0, SOME-CRAWLER, LinkPreview</li>
-	 * <li>안 맞음: 뒤에 소문자가 이어지는 경우(Robotics, Bottle), 전부 대문자인 단어의 일부(기기명 CUBOT X30)</li>
-	 * </ul>
-	 * 단순 부분 일치는 사람 기기 UA 를 봇으로 지워 오픈·클릭률과 워크플로우 분기를 틀리게 한다(PR #30 리뷰).
-	 * 단어 전체 일치만 보면 Googlebot 같은 실제 봇을 놓치므로 "단어 끝" 기준을 쓴다.
+	 * 규칙 2: 알려진 보안 스캐너·봇 User-Agent. 키워드는 대소문자를 무시한 <b>부분 일치</b>다
+	 * (Googlebot·GOOGLEBOT·AhrefsBot·crawlers 모두 봇).
+	 * 키워드를 우연히 포함하는 사람 기기명(예: Android 의 CUBOT)은 예외 목록에 두고, 판정 전에 UA 에서 지운다 —
+	 * 대소문자 모양으로 추측하지 않고 확인된 기기명만 뺀다 (PR #38 리뷰).
+	 * 비교는 소문자로 바꾼 문자열 하나로만 한다(원본과 길이가 다를 수 있어 위치를 섞어 쓰지 않는다).
 	 */
 	public boolean isBotUserAgent(String userAgent) {
 		if (userAgent == null || userAgent.isBlank()) {
 			return false;
 		}
 		String lower = userAgent.toLowerCase(Locale.ROOT);
-		return properties.botUserAgentKeywords().stream()
-			.map(keyword -> keyword.trim().toLowerCase(Locale.ROOT))
-			.filter(keyword -> !keyword.isEmpty())
-			.anyMatch(keyword -> containsAtWordEnd(userAgent, lower, keyword));
+		for (String allowed : normalized(properties.botUserAgentAllowList())) {
+			lower = lower.replace(allowed, " ");
+		}
+		String withoutAllowed = lower;
+		return normalized(properties.botUserAgentKeywords()).stream().anyMatch(withoutAllowed::contains);
 	}
 
-	private static boolean containsAtWordEnd(String userAgent, String lower, String keyword) {
-		for (int at = lower.indexOf(keyword); at >= 0; at = lower.indexOf(keyword, at + 1)) {
-			int end = at + keyword.length();
-			boolean wordEnds = end == userAgent.length() || !Character.isLowerCase(userAgent.charAt(end));
-			if (wordEnds && !insideUpperCaseWord(userAgent, at, end)) {
-				return true;
-			}
-		}
-		return false;
-	}
-
-	/** 맞은 부분이 전부 대문자이고 바로 앞도 대문자면 더 긴 대문자 단어(CUBOT)의 일부다 */
-	private static boolean insideUpperCaseWord(String userAgent, int start, int end) {
-		if (start == 0 || !Character.isUpperCase(userAgent.charAt(start - 1))) {
-			return false;
-		}
-		return userAgent.substring(start, end).chars().noneMatch(Character::isLowerCase);
+	private static List<String> normalized(List<String> values) {
+		return values.stream()
+			.map(value -> value.trim().toLowerCase(Locale.ROOT))
+			.filter(value -> !value.isEmpty())
+			.toList();
 	}
 
 	/**

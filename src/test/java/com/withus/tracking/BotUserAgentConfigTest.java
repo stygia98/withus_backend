@@ -51,13 +51,20 @@ class BotUserAgentConfigTest {
 	}
 
 	@Test
-	void 키워드를_단어_안에_포함한_사람_기기는_봇이_아니다() {
-		// 'bot' 부분 일치로 지워지던 사람 UA (PR #30 리뷰)
+	void 키워드를_포함한_사람_기기명은_예외_목록으로_뺀다() {
+		// 'bot' 부분 일치로 지워지던 사람 UA (PR #30·#38 리뷰). 예외 목록(bot-user-agent-allow-list)에 있는 기기명만 뺀다
 		assertThat(detector.isBotUserAgent(
 			"Mozilla/5.0 (Linux; Android 10; CUBOT X30) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Mobile Safari/537.36"))
 			.isFalse();
-		assertThat(detector.isBotUserAgent("Mozilla/5.0 (Linux; Android 12; Robotics Tab) Chrome/126.0 Safari/537.36"))
+		assertThat(detector.isBotUserAgent("Mozilla/5.0 (Linux; Android 11; Cubot_KingKong) Chrome/126.0 Mobile Safari/537.36"))
 			.isFalse();
+	}
+
+	@Test
+	void 소문자로_바꾸면_길이가_달라지는_문자가_있어도_예외_없이_판정한다() {
+		// İ(U+0130)는 소문자화하면 2글자가 된다 — 원본과 소문자 문자열의 위치를 섞어 쓰면 StringIndexOutOfBoundsException
+		assertThat(detector.isBotUserAgent("İ Googlebot")).isTrue();
+		assertThat(detector.isBotUserAgent("İİİ Mozilla/5.0 (Windows NT 10.0) Chrome/126.0")).isFalse();
 	}
 
 	@Test
@@ -68,5 +75,9 @@ class BotUserAgentConfigTest {
 		assertThat(detector.isBotUserAgent("Mozilla/5.0 (compatible; AhrefsBot/7.0; +http://ahrefs.com/robot/)")).isTrue();
 		assertThat(detector.isBotUserAgent("Mozilla/5.0 (compatible; Baiduspider/2.0)")).isTrue();
 		assertThat(detector.isBotUserAgent("Mozilla/5.0 (compatible; SecurityScanner/1.0)")).isTrue();
+		// 대문자 UA·키워드 뒤에 글자가 이어지는 UA 도 부분 일치라 놓치지 않는다
+		assertThat(detector.isBotUserAgent("GOOGLEBOT/2.1")).isTrue();
+		assertThat(detector.isBotUserAgent("LINKEDINBOT/1.0 (compatible)")).isTrue();
+		assertThat(detector.isBotUserAgent("acme-crawlers/3.2")).isTrue();
 	}
 }

@@ -20,7 +20,7 @@ class TrackingHtmlRewriterTest {
 	private static final String TOKEN = "6f1c2d3e-0000-4000-8000-000000000001";
 
 	private final TrackingHtmlRewriter rewriter = new TrackingHtmlRewriter(
-		new TrackingProperties(BASE, 10, List.of("bot"), "salt", 1));
+		new TrackingProperties(BASE, 10, List.of("bot"), "salt", 1, List.of()));
 
 	/** 호출된 원본 URL 을 기록하고, 처음 보는 URL 에 1, 2, 3... 을 배정하는 resolver */
 	private static class Recorder implements Function<String, Long> {
@@ -192,7 +192,7 @@ class TrackingHtmlRewriterTest {
 	@Test
 	void 기준_주소_끝의_슬래시와_대소문자에_상관없이_제외_경로를_판단한다() {
 		TrackingHtmlRewriter slashBase = new TrackingHtmlRewriter(
-			new TrackingProperties(BASE + "/", 10, List.of(), "", 1));
+			new TrackingProperties(BASE + "/", 10, List.of(), "", 1, List.of()));
 		Recorder resolver = new Recorder();
 
 		String result = slashBase.rewrite("<a href=\"" + BASE.toUpperCase() + "/C/abc\">쿠폰</a><a href=\"https://s.example.com/x\">일반</a>",
