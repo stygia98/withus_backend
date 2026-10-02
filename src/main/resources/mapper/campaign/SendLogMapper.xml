@@ -64,12 +64,12 @@
 		ON CONFLICT ON CONSTRAINT uq_send_log_step DO NOTHING
 	</insert>
 
-	<!-- 시작 전에 적재됐다가 시작이 실패해 남은 일회성 PENDING 을 지운다. 캠페인이 아직 DRAFT·SCHEDULED 일 때만, 한 번도 시도하지 않은
+	<!-- 시작 전에 적재됐다가 시작이 실패해 남은 일회성 PENDING·SKIPPED 를 지운다(SKIPPED 가 남으면 동의가 바뀐 고객이 ON CONFLICT 때문에 영영 못 받는다). 캠페인이 아직 DRAFT·SCHEDULED 일 때만, 한 번도 시도하지 않은
 	     (attempt_count = 0) 행만 지운다 — 동시에 시작된 캠페인이 ACTIVE 가 된 뒤의 재시도 대기 행(쿠폰 FK 가 걸릴 수 있음)은 건드리지 않는다.
 	     SENDING 이상·TEST·워크플로우 건도 제외 (이슈 #52) -->
 	<delete id="deleteUnstartedCampaignPending">
 		DELETE FROM send_log
-		WHERE campaign_id = #{campaignId} AND kind = 'CAMPAIGN' AND status = 'PENDING' AND instance_id IS NULL
+		WHERE campaign_id = #{campaignId} AND kind = 'CAMPAIGN' AND status IN ('PENDING', 'SKIPPED') AND instance_id IS NULL
 		  AND attempt_count = 0
 		  AND EXISTS (SELECT 1 FROM campaign c WHERE c.campaign_id = send_log.campaign_id
 		              AND c.status IN ('DRAFT', 'SCHEDULED'))
@@ -167,8 +167,14 @@
 		WHERE send_log_id = #{sendLogId} AND status = 'SENDING'
 	</update>
 
-	<!-- 새 캠페인을 시작하기 전, 이미 밀려 있는 대기분(캠페인 3/4 estimate) -->
+	<!-- 새 캠페인을 시작하기 전, 이미 밀려 있는 대기분(캠페인 3/4 estimate). claimBatch 와 같은 조건으로 선점 가능한 행만 센다 —
+	     DRAFT·SCHEDULED·PAUSED 캠페인의 막힌 행(시작 실패로 남은 고아 포함)이 모든 캠페인의 소요 시간을 부풀리지 않게 한다 (이슈 #53) -->
 	<select id="countPending" resultType="long">
-		SELECT count(*) FROM send_log WHERE status = 'PENDING'
+		SELECT count(*) FROM send_log
+		WHERE status = 'PENDING'
+		  AND (kind &lt;&gt; 'CAMPAIGN' OR NOT EXISTS (
+		      SELECT 1 FROM campaign c
+		      WHERE c.campaign_id = send_log.campaign_id AND c.status IN ('DRAFT', 'SCHEDULED', 'PAUSED')
+		  ))
 	</select>
 </mapper>

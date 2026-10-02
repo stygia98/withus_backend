@@ -171,6 +171,26 @@ class CampaignStartOrderTest {
 	}
 
 	@Test
+	void 예약을_취소하면_시작이_실패해_남았을_수_있는_적재분을_치운다() {
+		campaign(CampaignStatus.SCHEDULED);
+		when(campaignMapper.cancelSchedule(1L)).thenReturn(1);
+
+		service.cancelSchedule(1L);
+
+		verify(sendLogMapper).deleteUnstartedCampaignPending(1L);
+	}
+
+	@Test
+	void 예약_취소가_실패하면_적재분을_지우지_않는다() {
+		campaign(CampaignStatus.ACTIVE);
+		when(campaignMapper.cancelSchedule(1L)).thenReturn(0);
+
+		assertThatThrownBy(() -> service.cancelSchedule(1L)).isInstanceOf(BusinessException.class);
+
+		verify(sendLogMapper, never()).deleteUnstartedCampaignPending(anyLong());
+	}
+
+	@Test
 	void 적재가_실패하면_내_선점을_푼다() {
 		campaign(CampaignStatus.DRAFT);
 		template();

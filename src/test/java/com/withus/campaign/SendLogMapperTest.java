@@ -314,8 +314,9 @@ class SendLogMapperTest {
 
 		List<SendLog> claimed = sendLogMapper.claimBatch();
 
-		assertThat(claimed).extracting(SendLog::getCustomerId)
-			.as("PRD 8.4 테스트 발송만 예외 — CAMPAIGN 행은 막히고 TEST 행은 나간다")
+		assertThat(claimed).filteredOn(log -> log.getCampaignId() == draftCampaignId)
+			.extracting(SendLog::getCustomerId)
+			.as("PRD 8.4 테스트 발송만 예외 — CAMPAIGN 행은 막히고 TEST 행은 나간다 (공유 DB 의 다른 행은 보지 않는다)")
 			.containsOnly(testCustomerId);
 	}
 
@@ -361,5 +362,41 @@ class SendLogMapperTest {
 		jdbcTemplate.update("UPDATE campaign SET status = 'DRAFT' WHERE campaign_id = ?", campaignId);
 		assertThat(sendLogMapper.deleteUnstartedCampaignPending(campaignId))
 			.as("DRAFT 여도 이미 시도한(attempt_count > 0) 행은 남긴다").isEqualTo(1);
+	}
+
+	@Test
+	void 재시작_전_고아_PENDING과_SKIPPED는_지워지고_백로그에서도_빠진다() {
+		long backlogBefore = sendLogMapper.countPending();
+		long campaignId = newOneTimeCampaign(newSegment());
+		jdbcTemplate.update("UPDATE campaign SET status = 'DRAFT' WHERE campaign_id = ?", campaignId);
+		long skippedCustomerId = newCustomer();
+		sendLogMapper.insertOneTimeBatch(List.of(oneTimeLog(campaignId, customerId), oneTimeLog(campaignId, skippedCustomerId)));
+		jdbcTemplate.update("UPDATE send_log SET status = 'SKIPPED', error_message = 'NO_CONSENT' "
+			+ "WHERE campaign_id = ? AND customer_id = ?", campaignId, skippedCustomerId);
+
+		// 고아 PENDING 은 막혀 있으므로 백로그에 세지 않는다 (DRAFT 라 claimBatch 도 못 가져간다)
+		long backlogWithOrphans = sendLogMapper.countPending();
+		int deleted = sendLogMapper.deleteUnstartedCampaignPending(campaignId);
+
+		assertThat(deleted).as("PENDING 1건 + SKIPPED 1건").isEqualTo(2);
+		assertThat(backlogWithOrphans).as("고아가 있어도 백로그는 그대로").isEqualTo(backlogBefore);
+		assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM send_log WHERE campaign_id = ?", Long.class,
+			campaignId)).isZero();
+	}
+
+	@Test
+	void DRAFT_SCHEDULED_PAUSED_캠페인의_막힌_행은_countPending에_세지_않는다() {
+		long segmentId = newSegment();
+		long before = sendLogMapper.countPending();
+		for (String status : List.of("DRAFT", "SCHEDULED", "PAUSED")) {
+			long campaignId = newOneTimeCampaign(segmentId);
+			jdbcTemplate.update("UPDATE campaign SET status = ? WHERE campaign_id = ?", status, campaignId);
+			sendLogMapper.insertOneTimeBatch(List.of(oneTimeLog(campaignId, newCustomer())));
+		}
+		long activeCampaignId = newOneTimeCampaign(segmentId);
+		jdbcTemplate.update("UPDATE campaign SET status = 'ACTIVE' WHERE campaign_id = ?", activeCampaignId);
+		sendLogMapper.insertOneTimeBatch(List.of(oneTimeLog(activeCampaignId, newCustomer())));
+
+		assertThat(sendLogMapper.countPending() - before).as("ACTIVE 캠페인의 PENDING 1건만 센다").isEqualTo(1);
 	}
 }
