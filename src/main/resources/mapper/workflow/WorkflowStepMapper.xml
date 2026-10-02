@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.withus.workflow.mapper.WorkflowStepMapper">
+
+	<sql id="columns">
+		step_id, campaign_id, node_type, config_json::text AS config_json,
+		next_step_id, yes_step_id, no_step_id, depth, created_at, updated_at
+	</sql>
+
+	<select id="findByCampaignId" resultType="com.withus.workflow.domain.WorkflowStep">
+		SELECT <include refid="columns"/> FROM workflow_step
+		WHERE campaign_id = #{campaignId}
+		ORDER BY step_id
+	</select>
+
+	<insert id="insertBatch" useGeneratedKeys="true" keyProperty="stepId">
+		INSERT INTO workflow_step (campaign_id, node_type, config_json, depth)
+		VALUES
+		<foreach collection="list" item="item" separator=",">
+			(#{item.campaignId}, #{item.nodeType}, CAST(#{item.configJson} AS jsonb), #{item.depth})
+		</foreach>
+	</insert>
+
+	<update id="updateLinks">
+		UPDATE workflow_step SET next_step_id = #{nextStepId}, yes_step_id = #{yesStepId},
+			no_step_id = #{noStepId}, updated_at = now()
+		WHERE step_id = #{stepId}
+	</update>
+
+	<delete id="deleteByCampaignId">
+		DELETE FROM workflow_step WHERE campaign_id = #{campaignId}
+	</delete>
+</mapper>
