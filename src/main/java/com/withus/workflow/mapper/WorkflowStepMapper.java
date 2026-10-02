@@ -29,6 +29,9 @@ public interface WorkflowStepMapper {
 	void updateLinks(@Param("stepId") long stepId, @Param("nextStepId") Long nextStepId,
 		@Param("yesStepId") Long yesStepId, @Param("noStepId") Long noStepId);
 
+	/** 여러 노드의 next·yes·no 를 UPDATE 한 번으로 설정한다. 각 step 의 stepId·nextStepId·yesStepId·noStepId 를 쓴다 */
+	void updateLinksBatch(@Param("steps") List<WorkflowStep> steps);
+
 	/** 캠페인 구조 저장(PUT)은 기존 구조를 통째로 지우고 다시 쓴다 */
 	void deleteByCampaignId(@Param("campaignId") long campaignId);
 

@@ -24,6 +24,7 @@ class WorkflowStepMapperXmlLoadTest {
 			.contains("com.withus.workflow.mapper.WorkflowStepMapper.findByCampaignId",
 				"com.withus.workflow.mapper.WorkflowStepMapper.insertBatch",
 				"com.withus.workflow.mapper.WorkflowStepMapper.updateLinks",
+				"com.withus.workflow.mapper.WorkflowStepMapper.updateLinksBatch",
 				"com.withus.workflow.mapper.WorkflowStepMapper.deleteByCampaignId");
 	}
 }
