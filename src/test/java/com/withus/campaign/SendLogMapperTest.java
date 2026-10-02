@@ -334,6 +334,8 @@ class SendLogMapperTest {
 	@Test
 	void 시작_실패로_남은_PENDING만_지우고_SENDING_이상과_TEST는_남긴다() {
 		long campaignId = newOneTimeCampaign(newSegment());
+		// 삭제는 DRAFT·SCHEDULED 캠페인에서만 일어난다(이슈 #52 상태 가드) — newOneTimeCampaign 은 ACTIVE 로 만든다
+		jdbcTemplate.update("UPDATE campaign SET status = 'DRAFT' WHERE campaign_id = ?", campaignId);
 		long sentCustomerId = newCustomer();
 		long testCustomerId = newCustomer();
 		sendLogMapper.insertOneTimeBatch(List.of(
@@ -355,5 +357,21 @@ class SendLogMapperTest {
 	@Test
 	void 없는_쿠폰의_유효기간_확인은_null이다() {
 		assertThat(sendLogMapper.isCouponValid(-1L)).isNull();
+	}
+
+	@Test
+	void ACTIVE가_된_캠페인의_PENDING은_고아_삭제에서_지워지지_않는다() {
+		long campaignId = newOneTimeCampaign(newSegment());
+		long retryCustomerId = newCustomer();
+		sendLogMapper.insertOneTimeBatch(List.of(oneTimeLog(campaignId, customerId), oneTimeLog(campaignId, retryCustomerId)));
+		jdbcTemplate.update("UPDATE send_log SET attempt_count = 1 WHERE campaign_id = ? AND customer_id = ?",
+			campaignId, retryCustomerId);
+
+		jdbcTemplate.update("UPDATE campaign SET status = 'ACTIVE' WHERE campaign_id = ?", campaignId);
+		assertThat(sendLogMapper.deleteUnstartedCampaignPending(campaignId)).as("ACTIVE 면 아무것도 지우지 않는다").isZero();
+
+		jdbcTemplate.update("UPDATE campaign SET status = 'DRAFT' WHERE campaign_id = ?", campaignId);
+		assertThat(sendLogMapper.deleteUnstartedCampaignPending(campaignId))
+			.as("DRAFT 여도 이미 시도한(attempt_count > 0) 행은 남긴다").isEqualTo(1);
 	}
 }

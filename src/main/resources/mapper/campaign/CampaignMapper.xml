@@ -67,9 +67,27 @@
 		WHERE campaign_id = #{campaignId} AND status = 'SCHEDULED'
 	</update>
 
+	<!-- 시작 선점: 아무도 선점하지 않았거나(또는 10분 넘은 낡은 선점) 읽은 updated_at 이 그대로일 때만 start_claimed_at 을 찍고 돌려준다.
+	     updated_at 은 건드리지 않는다 — 건드리면 선점 뒤에 읽어 온 다른 요청도 같은 조건을 만족해 둘 다 통과한다 (PR #54 리뷰).
+	     RETURNING 쿼리라 1차 캐시되면 안 된다 -->
+	<select id="claimStart" resultType="java.time.OffsetDateTime" flushCache="true">
+		UPDATE campaign SET start_claimed_at = clock_timestamp()
+		WHERE campaign_id = #{campaignId} AND status IN ('DRAFT', 'SCHEDULED') AND updated_at = #{readAt}
+		  AND (start_claimed_at IS NULL OR start_claimed_at &lt; now() - interval '10 minutes')
+		RETURNING start_claimed_at
+	</select>
+
+	<!-- 시작 실패·중단 시 내 선점만 푼다(다른 요청이 새로 선점한 값은 건드리지 않는다) -->
+	<update id="releaseStart">
+		UPDATE campaign SET start_claimed_at = NULL
+		WHERE campaign_id = #{campaignId} AND start_claimed_at = #{claimedAt}
+	</update>
+
+	<!-- 최종 전환: 내 선점이 그대로고(claimedAt) 선점 뒤에 예약 취소·수정·재예약이 끼지 않았을 때(updated_at = readAt)만 -->
 	<update id="start">
-		UPDATE campaign SET status = 'ACTIVE', started_at = now(), updated_at = now()
+		UPDATE campaign SET status = 'ACTIVE', started_at = now(), updated_at = now(), start_claimed_at = NULL
 		WHERE campaign_id = #{campaignId} AND status IN ('DRAFT', 'SCHEDULED')
+		  AND updated_at = #{readAt} AND start_claimed_at = #{claimedAt}
 	</update>
 
 	<select id="findDueScheduled" resultType="long">
