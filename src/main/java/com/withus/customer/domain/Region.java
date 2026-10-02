@@ -28,11 +28,16 @@ public enum Region {
 	GYEONGNAM("경상남도", "경남"),
 	JEJU("제주특별자치도", "제주", "제주도");
 
-	/** 정식명, 약칭, 옛 명칭 순 */
+	/** 정식명, 약칭, 옛 명칭 순. 약칭(두 번째)은 필수 — displayName() 이 쓴다 */
 	private final List<String> names;
 
 	Region(String... names) {
 		this.names = List.of(names);
+	}
+
+	/** 화면·치환자({{region}})에 쓰는 표시명 = 약칭 ("서울"). 프론트 지역 목록과 같다 */
+	public String displayName() {
+		return names.get(1);
 	}
 
 	/** 코드(대소문자 무시)·정식명·약칭·옛 명칭으로 찾는다. 없으면 CUSTOMER_INVALID_REGION */

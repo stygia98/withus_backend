@@ -12,6 +12,7 @@ import com.withus.tracking.domain.QueueCounts;
 import com.withus.tracking.domain.RecentEventRow;
 import com.withus.tracking.domain.SendStats;
 import com.withus.tracking.domain.SendStepRow;
+import com.withus.tracking.domain.StepSendStats;
 
 /** 대시보드·성과 집계 (send_log·campaign·customer 는 다른 도메인 테이블, SELECT 만) */
 @Mapper
@@ -23,6 +24,10 @@ public interface DashboardMapper {
 	 */
 	SendStats sendStats(@Param("campaignId") Long campaignId, @Param("stepId") Long stepId,
 		@Param("from") OffsetDateTime from, @Param("to") OffsetDateTime to);
+
+	/** 워크플로우 캠페인의 단계별 집계. 발송이 없는 단계는 행이 없다 */
+	List<StepSendStats> sendStatsByStep(@Param("campaignId") long campaignId, @Param("from") OffsetDateTime from,
+		@Param("to") OffsetDateTime to);
 
 	/** from~to(포함) 의 날짜별 발송 성공 건수. 한국 시간 날짜 기준 */
 	List<DailySendRow> dailySends(@Param("from") LocalDate from, @Param("to") LocalDate to);

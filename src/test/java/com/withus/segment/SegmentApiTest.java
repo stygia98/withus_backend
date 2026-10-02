@@ -3,7 +3,6 @@ package com.withus.segment;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -33,6 +32,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.jayway.jsonpath.JsonPath;
 import com.withus.auth.domain.Role;
 import com.withus.auth.security.AuthMember;
+import com.withus.common.TestCsrf;
 import com.withus.common.exception.BusinessException;
 import com.withus.common.exception.CommonErrorCode;
 import com.withus.segment.service.SegmentService;
@@ -284,7 +284,7 @@ class SegmentApiTest {
 	}
 
 	private ResultActions call(MockHttpServletRequestBuilder request, Role role) throws Exception {
-		return mvc.perform(request.contentType(MediaType.APPLICATION_JSON).with(auth(role)).with(csrf()));
+		return mvc.perform(request.contentType(MediaType.APPLICATION_JSON).with(auth(role)).with(TestCsrf.issue(mvc)));
 	}
 
 	private RequestPostProcessor auth(Role role) {

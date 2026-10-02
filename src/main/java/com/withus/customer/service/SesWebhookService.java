@@ -14,6 +14,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import com.withus.campaign.service.SendQueueService;
 import com.withus.common.domain.Channel;
 
 import tools.jackson.core.JacksonException;
@@ -24,6 +25,7 @@ import tools.jackson.databind.ObjectMapper;
  * SES 반송·스팸신고 웹훅 (PRD 8.2, API_SPEC 9장). 인증 없이 열려 있으므로 SNS 서명과 토픽 ARN 을 확인한 요청만 처리한다
  * - 검증 실패·형식 오류는 로그만 남기고 무시한다 (응답은 항상 200)
  * - 영구 반송(Permanent)·스팸신고 수신자 이메일 → suppression 추가 + 동의 N (SuppressionService). 일시 반송은 무시
+ * - 영구 반송이면 원 발송 건(mail.messageId = provider_message_id)을 BOUNCED 로 기록한다 (send_log 는 팀원2 소유라 SendQueueService 로)
  * - 외부 호출(인증서·구독 확인)은 트랜잭션 밖에서 한다
  */
 @Service
@@ -43,13 +45,16 @@ public class SesWebhookService {
 	private final ObjectMapper objectMapper;
 	private final SnsHttpClient snsHttpClient;
 	private final SuppressionService suppressionService;
+	private final SendQueueService sendQueueService;
 	private final String topicArn;
 
 	public SesWebhookService(ObjectMapper objectMapper, SnsHttpClient snsHttpClient,
-		SuppressionService suppressionService, @Value("${ses.topic-arn:}") String topicArn) {
+		SuppressionService suppressionService, SendQueueService sendQueueService,
+		@Value("${ses.topic-arn:}") String topicArn) {
 		this.objectMapper = objectMapper;
 		this.snsHttpClient = snsHttpClient;
 		this.suppressionService = suppressionService;
+		this.sendQueueService = sendQueueService;
 		this.topicArn = topicArn;
 	}
 
@@ -105,11 +110,28 @@ public class SesWebhookService {
 			return;
 		}
 		// 수신자 주소 기준으로 거부한다: 고객이 아직 없거나 삭제됐어도 이후 등록·발송에서 걸러진다 (PRD 7장)
+		// 법규상 더 중요한 suppression 을 먼저 처리한다
 		for (JsonNode r : recipients) {
 			String email = CustomerNormalizer.email(text(r, "emailAddress"));
 			if (email != null && !email.isEmpty()) {
 				suppressionService.suppress(Channel.EMAIL, email, reason);
 			}
+		}
+		// 스팸신고는 send_log 를 SENT 로 둔다: BOUNCED 로 바꾸면 이미 집계된 오픈·클릭·전환이 사후에 빠진다 (PRD 8.2)
+		if ("BOUNCE".equals(reason)) {
+			markBounced(text(ses.path("mail"), "messageId"));
+		}
+	}
+
+	/** send_log 갱신 실패가 suppression 이나 웹훅 응답(200)에 영향을 주지 않게 격리한다 */
+	private void markBounced(String messageId) {
+		if (messageId == null || messageId.isBlank()) {
+			return;
+		}
+		try {
+			sendQueueService.markBounced(messageId);
+		} catch (RuntimeException e) {
+			log.warn("SES 웹훅: send_log BOUNCED 반영 실패 messageId={} ({})", messageId, e.getMessage());
 		}
 	}
 

@@ -93,4 +93,41 @@ class SendWindowTest {
 		assertThat(result.allowed()).isTrue();
 		assertThat(result.expectedEndAt()).isEqualTo(at(8, 10));
 	}
+
+	@Test
+	void evaluateBulk는_요청_오프셋과_무관하게_서울_시각으로_판정한다() {
+		// 2026-10-05T11:50:00Z = 서울 20:50 — 다른 오프셋이어도 같은 순간이면 같은 결과
+		OffsetDateTime utc = OffsetDateTime.of(2026, 10, 5, 11, 50, 1, 0, ZoneOffset.UTC); // 서울 20:50:01
+		OffsetDateTime seoul = utc.withOffsetSameInstant(ZoneOffset.ofHours(9));
+		OffsetDateTime minus5 = utc.withOffsetSameInstant(ZoneOffset.ofHours(-5));
+
+		assertThat(sendWindow.evaluateBulk(utc, 0).allowed()).as("Z 로 온 서울 20:50:01").isFalse();
+		assertThat(sendWindow.evaluateBulk(minus5, 0).allowed()).as("-05:00 으로 온 서울 20:50:01").isFalse();
+		assertThat(sendWindow.evaluateBulk(seoul, 0).allowed()).isFalse();
+	}
+
+	@Test
+	void evaluateBulk는_UTC_0시를_서울_09시로_본다() {
+		// 서울 09:00 은 창 안이므로 08:00 으로 당겨지지 않는다
+		OffsetDateTime utcMidnight = OffsetDateTime.of(2026, 10, 5, 0, 0, 0, 0, ZoneOffset.UTC);
+
+		SendWindow.BulkWindowResult result = sendWindow.evaluateBulk(utcMidnight, 60);
+
+		assertThat(result.allowed()).isTrue();
+		assertThat(result.expectedEndAt().toInstant()).isEqualTo(utcMidnight.plusSeconds(60).toInstant());
+	}
+
+	@Test
+	void evaluateBulk_종료_시각이_정확히_20시50분이면_통과하고_1초_넘기면_막는다() {
+		OffsetDateTime start = at(20, 0); // 20:00:00
+		assertThat(sendWindow.evaluateBulk(start, 50 * 60).allowed()).as("종료 20:50:00").isTrue();
+		assertThat(sendWindow.evaluateBulk(start, 50 * 60 + 1).allowed()).as("종료 20:50:01").isFalse();
+	}
+
+	@Test
+	void holdUntil도_오프셋과_무관하게_서울_시각으로_판정한다() {
+		OffsetDateTime utc = OffsetDateTime.of(2026, 10, 5, 11, 50, 1, 0, ZoneOffset.UTC); // 서울 20:50:01
+
+		assertThat(sendWindow.holdUntil(utc)).isPresent();
+	}
 }

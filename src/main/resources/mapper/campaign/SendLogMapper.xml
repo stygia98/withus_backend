@@ -73,7 +73,7 @@
 				WHERE status = 'PENDING' AND (next_attempt_at IS NULL OR next_attempt_at &lt;= now())
 				  AND NOT EXISTS (
 				      SELECT 1 FROM campaign c
-				      WHERE c.campaign_id = send_log.campaign_id AND c.status = 'PAUSED'
+				      WHERE c.campaign_id = send_log.campaign_id AND c.status IN ('DRAFT', 'SCHEDULED', 'PAUSED')
 				  )
 				ORDER BY priority, send_log_id
 				LIMIT 50
@@ -99,6 +99,10 @@
 	<select id="findByProviderMessageId" resultMap="sendLogResultMap">
 		SELECT * FROM send_log WHERE provider_message_id = #{providerMessageId}
 	</select>
+
+	<update id="markBounced">
+		UPDATE send_log SET status = 'BOUNCED' WHERE provider_message_id = #{providerMessageId} AND status = 'SENT'
+	</update>
 
 	<select id="findCampaignStatus" resultType="string">
 		SELECT status FROM campaign WHERE campaign_id = #{campaignId}

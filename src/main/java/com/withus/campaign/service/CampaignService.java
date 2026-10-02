@@ -17,6 +17,7 @@ import com.withus.campaign.domain.CampaignStatus;
 import com.withus.campaign.domain.CampaignType;
 import com.withus.campaign.domain.SendKind;
 import com.withus.campaign.domain.Template;
+import com.withus.campaign.domain.TemplateErrorCode;
 import com.withus.campaign.dto.CampaignEstimateResponse;
 import com.withus.campaign.mapper.CampaignMapper;
 import com.withus.campaign.mapper.SendLogMapper;
@@ -89,6 +90,7 @@ public class CampaignService {
 
 	public Campaign create(Campaign campaign, long memberId) {
 		validateTypeFields(campaign);
+		requireSegment(campaign.getSegmentId());
 		if (campaign.getType() == CampaignType.ONE_TIME) {
 			validateCouponRequirement(campaign);
 		}
@@ -110,10 +112,15 @@ public class CampaignService {
 		existing.setCouponId(changes.getCouponId());
 		existing.setTriggerType(changes.getTriggerType());
 		validateTypeFields(existing);
+		requireSegment(existing.getSegmentId());
 		if (existing.getType() == CampaignType.ONE_TIME) {
 			validateCouponRequirement(existing);
 		}
-		campaignMapper.update(existing);
+		if (campaignMapper.update(existing) == 0) {
+			// 읽은 뒤 시작·예약 요청이 끼어들어 DRAFT 가 아니게 됐다
+			throw new BusinessException(CampaignErrorCode.CAMPAIGN_INVALID_STATUS,
+				"DRAFT 상태의 캠페인만 수정할 수 있습니다.", null);
+		}
 		return existing;
 	}
 
@@ -141,7 +148,7 @@ public class CampaignService {
 	}
 
 	private void validateCouponRequirement(Campaign campaign) {
-		Template template = templateMapper.findById(campaign.getTemplateId());
+		Template template = requireTemplate(campaign.getTemplateId());
 		boolean usesCouponUrl = containsCouponUrl(template.getSubject()) || containsCouponUrl(template.getBody());
 		if (usesCouponUrl && campaign.getCouponId() == null) {
 			throw new BusinessException(CampaignErrorCode.CAMPAIGN_COUPON_REQUIRED);
@@ -157,7 +164,7 @@ public class CampaignService {
 	public CampaignEstimateResponse estimate(long campaignId, OffsetDateTime startAt) {
 		Campaign campaign = getOrThrow(campaignId);
 		requireOneTime(campaign);
-		Template template = templateMapper.findById(campaign.getTemplateId());
+		Template template = requireTemplate(campaign.getTemplateId());
 		long targetCount = segmentService.findTargetCustomers(campaign.getSegmentId()).size();
 		long pendingBacklog = sendLogMapper.countPending();
 		long durationSeconds = (long) Math.ceil((pendingBacklog + targetCount) / (double) maxSendRate);
@@ -177,6 +184,13 @@ public class CampaignService {
 	public Campaign schedule(long campaignId, OffsetDateTime scheduledAt) {
 		Campaign campaign = getOrThrow(campaignId);
 		requireOneTime(campaign);
+		if (campaign.getStatus() != CampaignStatus.DRAFT) {
+			throw new BusinessException(CampaignErrorCode.CAMPAIGN_INVALID_STATUS,
+				"DRAFT 상태의 캠페인만 예약할 수 있습니다.", null);
+		}
+		if (!scheduledAt.isAfter(OffsetDateTime.now(clock))) {
+			throw new BusinessException(CommonErrorCode.COMMON_INVALID_INPUT, "예약 시각은 지금보다 뒤여야 합니다.", null);
+		}
 		checkSendWindowAndCoupon(campaign, scheduledAt);
 		if (campaignMapper.schedule(campaignId, scheduledAt) == 0) {
 			throw new BusinessException(CampaignErrorCode.CAMPAIGN_INVALID_STATUS,
@@ -205,26 +219,47 @@ public class CampaignService {
 	 */
 	public Campaign start(long campaignId) {
 		Campaign campaign = getOrThrow(campaignId);
+		// 상태를 먼저 본다 — ACTIVE·COMPLETED 캠페인에 시작을 불러도 시간·쿠폰 검사(422)나 대상 조회 없이 바로 409
+		if (campaign.getStatus() != CampaignStatus.DRAFT && campaign.getStatus() != CampaignStatus.SCHEDULED) {
+			throw new BusinessException(CampaignErrorCode.CAMPAIGN_INVALID_STATUS,
+				"DRAFT·SCHEDULED 상태의 캠페인만 시작할 수 있습니다.", null);
+		}
 		OffsetDateTime now = OffsetDateTime.now(clock);
 		if (campaign.getType() == CampaignType.ONE_TIME) {
 			checkSendWindowAndCoupon(campaign, now);
+			// 적재를 ACTIVE 전환보다 먼저 한다(PR #31 리뷰 🔴1). 반대로 하면 전환~적재 사이에 CampaignCompleteJob 이
+			// "PENDING·SENDING 없음"으로 보고 발송 0건인 채 COMPLETED 로 만들 수 있다. 적재된 건은 캠페인이 ACTIVE 가
+			// 되기 전에는 발송 큐가 선점하지 않고(claimBatch), 적재는 uq_send_log_one_time 으로 멱등이라
+			// 도중에 실패해도 상태는 그대로(DRAFT·SCHEDULED)라 다시 시작하면 이어서 적재된다
+			Template template = requireTemplate(campaign.getTemplateId());
+			List<Long> targetIds = segmentService.findTargetCustomers(campaign.getSegmentId());
+			sendQueueService.enqueueOneTime(campaignId, targetIds, template.getChannel(), SendKind.CAMPAIGN);
 		}
 		if (campaignMapper.start(campaignId) == 0) {
 			throw new BusinessException(CampaignErrorCode.CAMPAIGN_INVALID_STATUS,
 				"DRAFT·SCHEDULED 상태의 캠페인만 시작할 수 있습니다.", null);
 		}
-		if (campaign.getType() == CampaignType.ONE_TIME) {
-			Template template = templateMapper.findById(campaign.getTemplateId());
-			List<Long> targetIds = segmentService.findTargetCustomers(campaign.getSegmentId());
-			sendQueueService.enqueueOneTime(campaignId, targetIds, template.getChannel(), SendKind.CAMPAIGN);
-		}
 		campaign.setStatus(CampaignStatus.ACTIVE);
 		return campaign;
 	}
 
+	private Template requireTemplate(Long templateId) {
+		Template template = templateId == null ? null : templateMapper.findById(templateId);
+		if (template == null) {
+			throw new BusinessException(TemplateErrorCode.TEMPLATE_NOT_FOUND);
+		}
+		return template;
+	}
+
+	private void requireSegment(Long segmentId) {
+		if (segmentId == null || !campaignMapper.existsSegment(segmentId)) {
+			throw new BusinessException(CommonErrorCode.COMMON_INVALID_INPUT, "존재하지 않는 세그먼트입니다.", null);
+		}
+	}
+
 	/** 광고성이면 20:50 컷오프(SendWindow.evaluateBulk), 쿠폰이 있으면 유효기간을 확인한다 */
 	private void checkSendWindowAndCoupon(Campaign campaign, OffsetDateTime startAt) {
-		Template template = templateMapper.findById(campaign.getTemplateId());
+		Template template = requireTemplate(campaign.getTemplateId());
 		if (template.isAd()) {
 			long targetCount = segmentService.findTargetCustomers(campaign.getSegmentId()).size();
 			long pendingBacklog = sendLogMapper.countPending();

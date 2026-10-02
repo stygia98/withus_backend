@@ -45,6 +45,7 @@ withus:
     base-url: ${WITHUS_PUBLIC_BASE_URL:http://localhost:8080}   # 메일 링크 기준 주소. 운영: Amplify 주소
     bot-click-seconds: 10
     bot-user-agent-keywords: bot,crawler,spider,scanner,preview
+    bot-user-agent-allow-list: cubot   # 키워드(bot)를 포함하는 사람 기기명. 판정 전에 UA 에서 지운다
     burst-click-window-seconds: 1
     ip-salt: ${TRACKING_IP_SALT:}   # IP 해시 솔트. 비밀값이므로 환경변수로만 주입
   ai:
