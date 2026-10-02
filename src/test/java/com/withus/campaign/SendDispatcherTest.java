@@ -44,8 +44,6 @@ class SendDispatcherTest {
 	@Autowired
 	com.withus.workflow.service.WorkflowWakeup workflowWakeup;
 	@Autowired
-	org.springframework.transaction.PlatformTransactionManager transactionManager;
-	@Autowired
 	SendLogMapper sendLogMapper;
 	@Autowired
 	TemplateMapper templateMapper;
@@ -168,7 +166,7 @@ class SendDispatcherTest {
 
 		// 재시작을 흉내낸다: 완전히 새 SendDispatcher 인스턴스로 다시 호출해도 더 처리할 PENDING 이 없어야 한다
 		SendDispatcher restarted = new SendDispatcher(sendLogMapper, templateMapper, messageSenderRouter,
-			consentService, messageComposer, unsubscribeTokens, workflowWakeup, transactionManager, 1, "08:00", "20:50", "https://withus.local", false);
+			consentService, messageComposer, unsubscribeTokens, workflowWakeup, 1, "08:00", "20:50", "https://withus.local", false);
 		restarted.dispatch();
 
 		Long pendingCount = jdbcTemplate.queryForObject(

@@ -302,7 +302,11 @@ public class CampaignService {
 	public Campaign duplicate(long campaignId, long memberId) {
 		Campaign source = getOrThrow(campaignId);
 		Campaign copy = new Campaign();
-		copy.setName(source.getName() + " (복사)");
+		// campaign.name 은 VARCHAR(100) — 접미사를 붙여도 넘지 않게 원래 이름을 잘라 낸다(넘으면 DB 오류 500)
+		String suffix = " (복사)";
+		String base = source.getName().length() + suffix.length() > 100
+			? source.getName().substring(0, 100 - suffix.length()) : source.getName();
+		copy.setName(base + suffix);
 		copy.setType(source.getType());
 		copy.setSegmentId(source.getSegmentId());
 		copy.setTemplateId(source.getTemplateId());

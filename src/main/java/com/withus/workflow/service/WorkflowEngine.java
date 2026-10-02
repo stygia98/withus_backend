@@ -86,14 +86,25 @@ public class WorkflowEngine {
 					return;
 				}
 				case END -> {
-					workflowInstanceMapper.complete(instance.getInstanceId());
+					warnIfNotRunning(workflowInstanceMapper.complete(instance.getInstanceId()), instance, "complete");
 					return;
 				}
-				case CONDITION -> currentStepId = evaluateCondition(instance, step) ? step.getYesStepId()
-					: step.getNoStepId();
+				case CONDITION -> {
+					// "직전 SEND 의 결과" 는 CONDITION 을 지나면 의미가 없다 — 남겨 두면 뒤따르는 WAIT 가 PENDING 으로 보고
+					// next_run_at 을 비운 채 영원히 기다린다(wake 는 SEND 바로 뒤 WAIT 만 깨운다, PR #35 리뷰 🔴2, Plan 3.1 "그 외")
+					lastSendStatus = null;
+					currentStepId = evaluateCondition(instance, step) ? step.getYesStepId() : step.getNoStepId();
+				}
 				case TRIGGER -> throw new IllegalStateException(
 					"TRIGGER 는 인스턴스 생성 시 건너뛰므로 실행 중에는 도달할 수 없다");
 			}
+		}
+	}
+
+	/** 기록 UPDATE 가 0행이면 그 사이 인스턴스가 RUNNING 이 아니게 됐다(종료·삭제로 CANCELLED, 복구 후 다른 워커) — 덮어쓰지 않고 알린다 */
+	private void warnIfNotRunning(int updatedRows, WorkflowInstance instance, String action) {
+		if (updatedRows == 0) {
+			log.warn("워크플로우 인스턴스가 RUNNING 이 아니어서 {} 를 반영하지 않았다 instanceId={}", action, instance.getInstanceId());
 		}
 	}
 
@@ -101,14 +112,15 @@ public class WorkflowEngine {
 	private void retryOrFail(WorkflowInstance instance, Exception e) {
 		int nextRetryCount = instance.getRetryCount() + 1;
 		String errorMessage = e.getMessage();
-		if (nextRetryCount > MAX_RETRY) {
-			transactionTemplate
-				.executeWithoutResult(status -> workflowInstanceMapper.recordFailed(instance.getInstanceId(), errorMessage));
+		// PL 결정(PR #35 리뷰 🟡4): PRD 6.5-5 "3회 실패하면 FAILED" — 3번째 실패에서 FAILED (발송 큐의 "3회를 넘기면" 과 다른 규칙)
+		if (nextRetryCount >= MAX_RETRY) {
+			transactionTemplate.executeWithoutResult(status -> warnIfNotRunning(
+				workflowInstanceMapper.recordFailed(instance.getInstanceId(), errorMessage), instance, "recordFailed"));
 			return;
 		}
 		OffsetDateTime nextRunAt = OffsetDateTime.now(ZoneId.of("Asia/Seoul")).plusMinutes(RETRY_DELAY_MINUTES);
-		transactionTemplate.executeWithoutResult(
-			status -> workflowInstanceMapper.recordRetry(instance.getInstanceId(), nextRunAt, errorMessage));
+		transactionTemplate.executeWithoutResult(status -> warnIfNotRunning(
+			workflowInstanceMapper.recordRetry(instance.getInstanceId(), nextRunAt, errorMessage), instance, "recordRetry"));
 	}
 
 	/**
@@ -126,10 +138,12 @@ public class WorkflowEngine {
 	private void executeWait(WorkflowInstance instance, WorkflowStep step, SendStatus lastSendStatus) {
 		long nextStepId = step.getNextStepId();
 		if (lastSendStatus == SendStatus.PENDING) {
-			workflowInstanceMapper.moveToWaitPending(instance.getInstanceId(), nextStepId);
+			warnIfNotRunning(workflowInstanceMapper.moveToWaitPending(instance.getInstanceId(), nextStepId), instance,
+				"moveToWaitPending");
 		} else {
 			OffsetDateTime nextRunAt = OffsetDateTime.now(ZoneId.of("Asia/Seoul")).plus(WaitDurations.of(step.getConfigJson(), objectMapper));
-			workflowInstanceMapper.moveToWait(instance.getInstanceId(), nextStepId, nextRunAt);
+			warnIfNotRunning(workflowInstanceMapper.moveToWait(instance.getInstanceId(), nextStepId, nextRunAt), instance,
+				"moveToWait");
 		}
 	}
 

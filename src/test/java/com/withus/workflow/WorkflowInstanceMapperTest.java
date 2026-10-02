@@ -115,7 +115,7 @@ class WorkflowInstanceMapperTest {
 		long campaignId = newCampaign("ACTIVE");
 		stepId = newStep(campaignId);
 		for (int i = 0; i < 501; i++) {
-			newInstance(campaignId, stepId, OffsetDateTime.now().minusSeconds(1));
+			newInstance(campaignId, stepId, OffsetDateTime.now().minusHours(1));
 		}
 
 		List<WorkflowInstance> firstBatch = workflowInstanceMapper.claimBatch();

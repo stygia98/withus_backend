@@ -10,8 +10,6 @@ import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -54,13 +52,12 @@ public class SendDispatcher {
 	private final SendWindow sendWindow;
 	private final String trackingBaseUrl;
 	private final WorkflowWakeup workflowWakeup;
-	private final TransactionTemplate transactionTemplate;
 	private final boolean schedulerEnabled;
 
 	public SendDispatcher(SendLogMapper sendLogMapper, TemplateMapper templateMapper,
 			MessageSenderRouter messageSenderRouter, ConsentService consentService, MessageComposer messageComposer,
 			UnsubscribeTokens unsubscribeTokens,
-			WorkflowWakeup workflowWakeup, PlatformTransactionManager transactionManager,
+			WorkflowWakeup workflowWakeup,
 			@Value("${ses.max-send-rate}") int maxSendRate,
 			@Value("${withus.send-window.start}") String sendWindowStart,
 			@Value("${withus.send-window.end}") String sendWindowEnd,
@@ -73,7 +70,6 @@ public class SendDispatcher {
 		this.messageComposer = messageComposer;
 		this.unsubscribeTokens = unsubscribeTokens;
 		this.workflowWakeup = workflowWakeup;
-		this.transactionTemplate = new TransactionTemplate(transactionManager);
 		this.tokenBucket = new TokenBucket(maxSendRate);
 		this.sendWindow = new SendWindow(LocalTime.parse(sendWindowStart), LocalTime.parse(sendWindowEnd));
 		this.trackingBaseUrl = trackingBaseUrl;
@@ -139,21 +135,29 @@ public class SendDispatcher {
 		}
 	}
 
-	/** 결과 기록 UPDATE 가 status = 'SENDING' 조건 때문에 0행이면(멈춤 복구가 먼저 처리한 건) 경고만 남긴다 */
 	/**
-	 * 종단 결과(SENT·FAILED·SKIPPED) 기록과 워크플로우 깨우기를 한 트랜잭션으로 묶는다(워크플로우 Plan 4.2) —
-	 * 따로 하면 기록만 되고 wake 가 빠져 인스턴스가 next_run_at NULL 로 영원히 멈출 수 있다.
-	 * 외부 호출(send)은 이미 끝난 뒤라 트랜잭션 안에 외부 호출은 없다
+	 * 종단 결과(SENT·FAILED·SKIPPED)를 먼저 기록(커밋)하고, 그 다음에 워크플로우 인스턴스를 깨운다(워크플로우 Plan 4.2).
+	 * 한 트랜잭션으로 묶으면 wake 가 예외를 던질 때 이미 나간 메일의 SENT 기록까지 롤백되어 10분 뒤 UNKNOWN_RESULT 가 된다
+	 * (PR #35 리뷰 🟡3). 깨우기가 실패해도 기록은 남고, WorkflowRecoveryJob 이 "next_run_at 이 빈 채 직전 SEND 가 끝난"
+	 * 인스턴스를 주기적으로 찾아 깨운다.
 	 */
 	private void recordAndWake(SendLog sendLog, String action, java.util.function.IntSupplier record) {
-		transactionTemplate.executeWithoutResult(s -> {
-			int updatedRows = record.getAsInt();
-			warnIfNotRecorded(updatedRows, sendLog, action);
-			if (updatedRows > 0) {
-				workflowWakeup.wake(sendLog);
-			}
-		});
+		int updatedRows = record.getAsInt();
+		warnIfNotRecorded(updatedRows, sendLog, action);
+		if (updatedRows > 0) {
+			wakeSafely(sendLog);
+		}
 	}
+
+	private void wakeSafely(SendLog sendLog) {
+		try {
+			workflowWakeup.wake(sendLog);
+		} catch (Exception e) {
+			log.error("워크플로우 깨우기 실패 — 복구 작업이 다시 시도한다 sendLogId={}", sendLog.getSendLogId(), e);
+		}
+	}
+
+	/** 결과 기록 UPDATE 가 status = 'SENDING' 조건 때문에 0행이면(멈춤 복구가 먼저 처리한 건) 경고만 남긴다 */
 
 	private void warnIfNotRecorded(int updatedRows, SendLog sendLog, String action) {
 		if (updatedRows == 0) {
@@ -175,7 +179,7 @@ public class SendDispatcher {
 			trackingBaseUrl + "/unsubscribe/" + unsubscribeToken,
 			trackingBaseUrl + "/api/v1/unsubscribe/one-click/" + unsubscribeToken);
 		if (message.isEmpty()) {
-			transactionTemplate.executeWithoutResult(s -> workflowWakeup.wake(sendLog));
+			wakeSafely(sendLog);
 			return; // 쿠폰 유효기간 밖 — compose 안에서 이미 SKIPPED(COUPON_INVALID) 기록
 		}
 		SendResult result = messageSenderRouter.send(message.get());

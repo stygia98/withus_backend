@@ -37,7 +37,7 @@ class WorkflowTriggerServiceTest {
 	WorkflowInstanceMapper instanceMapper = mock(WorkflowInstanceMapper.class);
 	SegmentService segmentService = mock(SegmentService.class);
 	WorkflowTriggerService service = new WorkflowTriggerService(campaignMapper, stepMapper, instanceMapper,
-		segmentService);
+		segmentService, mock(org.springframework.transaction.PlatformTransactionManager.class));
 
 	@BeforeEach
 	void setUp() {

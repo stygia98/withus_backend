@@ -21,29 +21,32 @@
 
 	<update id="moveToWaitPending">
 		UPDATE workflow_instance SET status = 'WAITING', current_step_id = #{nextStepId}, next_run_at = NULL,
+			retry_count = 0, last_error = NULL,
 			updated_at = now()
-		WHERE instance_id = #{instanceId}
+		WHERE instance_id = #{instanceId} AND status = 'RUNNING'
 	</update>
 
 	<update id="moveToWait">
 		UPDATE workflow_instance SET status = 'WAITING', current_step_id = #{nextStepId}, next_run_at = #{nextRunAt},
+			retry_count = 0, last_error = NULL,
 			updated_at = now()
-		WHERE instance_id = #{instanceId}
+		WHERE instance_id = #{instanceId} AND status = 'RUNNING'
 	</update>
 
 	<update id="complete">
-		UPDATE workflow_instance SET status = 'COMPLETED', updated_at = now() WHERE instance_id = #{instanceId}
+		UPDATE workflow_instance SET status = 'COMPLETED', updated_at = now(), retry_count = 0, last_error = NULL
+		WHERE instance_id = #{instanceId} AND status = 'RUNNING'
 	</update>
 
 	<update id="recordRetry">
 		UPDATE workflow_instance SET status = 'WAITING', retry_count = retry_count + 1, next_run_at = #{nextRunAt},
 			last_error = #{errorMessage}, updated_at = now()
-		WHERE instance_id = #{instanceId}
+		WHERE instance_id = #{instanceId} AND status = 'RUNNING'
 	</update>
 
 	<update id="recordFailed">
 		UPDATE workflow_instance SET status = 'FAILED', last_error = #{errorMessage}, updated_at = now()
-		WHERE instance_id = #{instanceId}
+		WHERE instance_id = #{instanceId} AND status = 'RUNNING'
 	</update>
 
 	<update id="recoverStuckRunning">
@@ -63,6 +66,11 @@
 	<update id="cancelActiveByCampaign">
 		UPDATE workflow_instance SET status = 'CANCELLED', updated_at = now()
 		WHERE campaign_id = #{campaignId} AND status IN ('WAITING', 'RUNNING')
+	</update>
+
+	<update id="cancelActiveByCustomer">
+		UPDATE workflow_instance SET status = 'CANCELLED', updated_at = now()
+		WHERE customer_id = #{customerId} AND status IN ('WAITING', 'RUNNING')
 	</update>
 
 	<sql id="byCampaign">

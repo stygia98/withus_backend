@@ -76,9 +76,17 @@ public interface SendLogMapper {
 
 	/**
 	 * SENDING 으로 10분 넘게 남은 건을 FAILED(UNKNOWN_RESULT) 로 되돌린다(재발송하지 않음, DB_SCHEMA 7장).
-	 * @return 복구된 건수
+	 * 워크플로우 발송 건을 기다리던 인스턴스를 깨울 수 있게 바뀐 행을 돌려준다(PR #35 리뷰 🔴1)
+	 * @return 복구된 행
 	 */
-	int recoverStuckSending();
+	List<SendLog> recoverStuckSending();
+
+	/**
+	 * 워크플로우 인스턴스가 WAITING·next_run_at NULL(발송 결과 대기)인데 그 인스턴스의 가장 최근 발송 건이 이미 끝난(SENT·FAILED·
+	 * SKIPPED·BOUNCED) 경우의 그 발송 건 — wake() 가 빠졌거나 실패한 인스턴스를 찾는 보정용. updated_at 이 1분 이상 지난 것만
+	 * (방금 기록하고 곧 깨울 건은 건드리지 않는다)
+	 */
+	List<SendLog> findTerminalSendsOfWaitingInstances();
 
 	/** 렌더링용 치환 값 원본(customer SELECT) — MessageComposer 가 PlaceholderRenderer 에 넘길 Map 을 만든다 */
 	CustomerPlaceholderSource findPlaceholderSource(@Param("customerId") long customerId);
