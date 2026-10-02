@@ -157,7 +157,8 @@ public class CampaignService {
 		}
 	}
 
-	private boolean containsCouponUrl(String text) {
+	/** 워크플로우 SEND 노드 검증(workflow 패키지)에서도 같은 치환자 판정이 필요해 공개한다 */
+	public static boolean containsCouponUrl(String text) {
 		return text != null && COUPON_URL_PLACEHOLDER.matcher(text).find();
 	}
 
