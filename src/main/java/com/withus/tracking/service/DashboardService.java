@@ -67,7 +67,7 @@ public class DashboardService {
 	public DashboardSummaryResponse summary(LocalDate from, LocalDate to) {
 		LocalDate end = to != null ? to : LocalDate.now(clock);
 		LocalDate start = from != null ? from : end.minusDays(DEFAULT_SUMMARY_DAYS - 1);
-		SendDateBounds period = SendDateBounds.of(start, end);
+		SendDateBounds period = SendDateBounds.of(start, end, LocalDate.now(clock));
 		return new DashboardSummaryResponse(start, end,
 			SendKpi.of(dashboardMapper.sendStats(null, null, period.fromTs(), period.toTs())));
 	}
@@ -119,7 +119,7 @@ public class DashboardService {
 	 * PRD F-09 기간 필터(최근 7/30일, 직접 지정)
 	 */
 	public CampaignAnalyticsResponse campaign(long campaignId, LocalDate from, LocalDate to) {
-		SendDateBounds period = SendDateBounds.of(from, to);
+		SendDateBounds period = SendDateBounds.of(from, to, LocalDate.now(clock));
 		String name = requireCampaignName(campaignId);
 		return CampaignAnalyticsResponse.of(campaignId, name, from, to,
 			SendKpi.of(dashboardMapper.sendStats(campaignId, null, period.fromTs(), period.toTs())));
@@ -127,7 +127,7 @@ public class DashboardService {
 
 	/** 워크플로우 발송 단계별 KPI. 집계는 단계 수와 관계없이 쿼리 한 번이고, 발송이 없는 단계는 0 이다 */
 	public CampaignStepsResponse steps(long campaignId, LocalDate from, LocalDate to) {
-		SendDateBounds period = SendDateBounds.of(from, to);
+		SendDateBounds period = SendDateBounds.of(from, to, LocalDate.now(clock));
 		String name = requireCampaignName(campaignId);
 		String type = dashboardMapper.campaignType(campaignId);
 		if (!"WORKFLOW".equals(type)) {
@@ -153,18 +153,18 @@ public class DashboardService {
 
 	/**
 	 * 날짜(한국 시간, 양 끝 포함) → 집계 SQL 의 [fromTs, toTs). 생략한 쪽은 null(제한 없음).
-	 * 기간 규칙(from ≤ to, 양 끝을 모두 지정하면 최대 366일)은 대시보드·캠페인·단계별 성과가 모두 이것을 쓴다
+	 * 기간 규칙은 대시보드·캠페인·단계별 성과가 모두 이것을 쓴다:
+	 * from ≤ to, from 을 주면 최대 366일(to 를 생략하면 오늘까지로 센다).
+	 * from 을 생략하면 캠페인 전체 기간(캠페인 하나로 범위가 이미 좁혀짐)이라 상한을 두지 않는다
 	 */
 	private record SendDateBounds(OffsetDateTime fromTs, OffsetDateTime toTs) {
 
-		static SendDateBounds of(LocalDate from, LocalDate to) {
-			if (from != null && to != null) {
-				if (from.isAfter(to)) {
-					throw invalid("from 은 to 보다 늦을 수 없습니다.");
-				}
-				if (ChronoUnit.DAYS.between(from, to) + 1 > MAX_SUMMARY_DAYS) {
-					throw invalid("조회 기간은 최대 " + MAX_SUMMARY_DAYS + "일입니다.");
-				}
+		static SendDateBounds of(LocalDate from, LocalDate to, LocalDate today) {
+			if (from != null && to != null && from.isAfter(to)) {
+				throw invalid("from 은 to 보다 늦을 수 없습니다.");
+			}
+			if (from != null && ChronoUnit.DAYS.between(from, to != null ? to : today) + 1 > MAX_SUMMARY_DAYS) {
+				throw invalid("조회 기간은 최대 " + MAX_SUMMARY_DAYS + "일입니다.");
 			}
 			return new SendDateBounds(from == null ? null : from.atStartOfDay(SEOUL).toOffsetDateTime(),
 				to == null ? null : to.plusDays(1).atStartOfDay(SEOUL).toOffsetDateTime());
