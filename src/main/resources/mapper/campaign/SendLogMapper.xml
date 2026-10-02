@@ -77,7 +77,7 @@
 			WHERE send_log_id IN (
 				SELECT send_log_id FROM send_log
 				WHERE status = 'PENDING' AND (next_attempt_at IS NULL OR next_attempt_at &lt;= now())
-				  AND (send_log.kind <> 'CAMPAIGN' OR NOT EXISTS (
+				  AND (send_log.kind &lt;&gt; 'CAMPAIGN' OR NOT EXISTS (
 				      SELECT 1 FROM campaign c
 				      WHERE c.campaign_id = send_log.campaign_id AND c.status IN ('DRAFT', 'SCHEDULED', 'PAUSED')
 				  ))
