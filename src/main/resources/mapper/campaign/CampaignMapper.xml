@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.withus.campaign.mapper.CampaignMapper">
+
+	<sql id="columns">
+		campaign_id, name, type, status, segment_id, template_id, coupon_id, scheduled_at,
+		trigger_type, started_at, ended_at, created_by, created_at, updated_at
+	</sql>
+
+	<sql id="filter">
+		<where>
+			<if test="type != null">AND type = #{type}</if>
+			<if test="status != null">AND status = #{status}</if>
+		</where>
+	</sql>
+
+	<select id="findList" resultType="com.withus.campaign.domain.Campaign">
+		SELECT <include refid="columns"/> FROM campaign
+		<include refid="filter"/>
+		ORDER BY campaign_id DESC
+		LIMIT #{limit} OFFSET #{offset}
+	</select>
+
+	<select id="count" resultType="long">
+		SELECT count(*) FROM campaign
+		<include refid="filter"/>
+	</select>
+
+	<select id="findById" resultType="com.withus.campaign.domain.Campaign">
+		SELECT <include refid="columns"/> FROM campaign WHERE campaign_id = #{campaignId}
+	</select>
+
+	<insert id="insert" useGeneratedKeys="true" keyProperty="campaignId" keyColumn="campaign_id">
+		INSERT INTO campaign (name, type, status, segment_id, template_id, coupon_id, scheduled_at,
+			trigger_type, created_by)
+		VALUES (#{name}, #{type}, #{status}, #{segmentId}, #{templateId}, #{couponId}, #{scheduledAt},
+			#{triggerType}, #{createdBy})
+	</insert>
+
+	<update id="update">
+		UPDATE campaign
+		SET name = #{name}, segment_id = #{segmentId}, template_id = #{templateId}, coupon_id = #{couponId},
+			scheduled_at = #{scheduledAt}, trigger_type = #{triggerType}, updated_at = now()
+		WHERE campaign_id = #{campaignId} AND status = 'DRAFT'
+	</update>
+
+	<select id="existsCoupon" resultType="boolean">
+		SELECT EXISTS (SELECT 1 FROM coupon WHERE coupon_id = #{couponId})
+	</select>
+
+	<select id="existsSegment" resultType="boolean">
+		SELECT EXISTS (SELECT 1 FROM segment WHERE segment_id = #{segmentId})
+	</select>
+
+	<update id="updateStatus">
+		UPDATE campaign SET status = #{newStatus}, updated_at = now()
+		WHERE campaign_id = #{campaignId} AND status = #{expectedStatus}
+	</update>
+
+	<update id="schedule">
+		UPDATE campaign SET status = 'SCHEDULED', scheduled_at = #{scheduledAt}, updated_at = now()
+		WHERE campaign_id = #{campaignId} AND status = 'DRAFT'
+	</update>
+
+	<update id="cancelSchedule">
+		UPDATE campaign SET status = 'DRAFT', scheduled_at = NULL, updated_at = now()
+		WHERE campaign_id = #{campaignId} AND status = 'SCHEDULED'
+	</update>
+
+	<update id="start">
+		UPDATE campaign SET status = 'ACTIVE', started_at = now(), updated_at = now()
+		WHERE campaign_id = #{campaignId} AND status IN ('DRAFT', 'SCHEDULED')
+	</update>
+
+	<select id="findDueScheduled" resultType="long">
+		SELECT campaign_id FROM campaign WHERE status = 'SCHEDULED' AND scheduled_at &lt;= now()
+	</select>
+
+	<select id="findCompletable" resultType="long">
+		SELECT campaign_id FROM campaign c
+		WHERE c.type = 'ONE_TIME' AND c.status = 'ACTIVE' AND c.started_at IS NOT NULL
+		  AND NOT EXISTS (
+		      SELECT 1 FROM send_log sl WHERE sl.campaign_id = c.campaign_id AND sl.status IN ('PENDING', 'SENDING')
+		  )
+	</select>
+
+	<update id="complete">
+		UPDATE campaign SET status = 'COMPLETED', ended_at = now(), updated_at = now()
+		WHERE campaign_id = #{campaignId} AND status = 'ACTIVE'
+	</update>
+</mapper>

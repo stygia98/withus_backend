@@ -208,6 +208,23 @@ class SendLogMapperTest {
 	}
 
 	@Test
+	void ACTIVE_전에_미리_적재된_DRAFT_SCHEDULED_캠페인_건은_선점_대상에서_제외된다() {
+		long segmentId = newSegment();
+		long draftCampaignId = newOneTimeCampaign(segmentId);
+		jdbcTemplate.update("UPDATE campaign SET status = 'DRAFT' WHERE campaign_id = ?", draftCampaignId);
+		sendLogMapper.insertOneTimeBatch(List.of(oneTimeLog(draftCampaignId, customerId)));
+		long scheduledCampaignId = newOneTimeCampaign(segmentId);
+		jdbcTemplate.update("UPDATE campaign SET status = 'SCHEDULED', scheduled_at = now() + interval '1 day' "
+			+ "WHERE campaign_id = ?", scheduledCampaignId);
+		sendLogMapper.insertOneTimeBatch(List.of(oneTimeLog(scheduledCampaignId, newCustomer())));
+
+		List<SendLog> claimed = sendLogMapper.claimBatch();
+
+		assertThat(claimed).extracting(SendLog::getCampaignId)
+			.doesNotContain(draftCampaignId, scheduledCampaignId);
+	}
+
+	@Test
 	void 발송_성공을_기록하면_provider_message_id로_조회된다() {
 		long segmentId = newSegment();
 		long campaignId = newOneTimeCampaign(segmentId);
@@ -216,6 +233,7 @@ class SendLogMapperTest {
 			"SELECT send_log_id FROM send_log WHERE campaign_id = ? AND customer_id = ?",
 			Long.class, campaignId, customerId);
 
+		jdbcTemplate.update("UPDATE send_log SET status = 'SENDING' WHERE send_log_id = ?", sendLogId); // 실제 흐름: 선점 뒤에만 결과를 기록한다
 		sendLogMapper.recordSent(sendLogId, "ses-message-id-1");
 
 		SendLog found = sendLogMapper.findByProviderMessageId("ses-message-id-1");
@@ -234,6 +252,7 @@ class SendLogMapperTest {
 			"SELECT send_log_id FROM send_log WHERE campaign_id = ? AND customer_id = ?",
 			Long.class, campaignId, customerId);
 
+		jdbcTemplate.update("UPDATE send_log SET status = 'SENDING' WHERE send_log_id = ?", sendLogId); // 실제 흐름: 선점 뒤에만 결과를 기록한다
 		sendLogMapper.recordFailed(sendLogId, "PERMANENT");
 
 		String status = jdbcTemplate.queryForObject(
@@ -252,6 +271,7 @@ class SendLogMapperTest {
 		long sendLogId = jdbcTemplate.queryForObject(
 			"SELECT send_log_id FROM send_log WHERE campaign_id = ? AND customer_id = ?",
 			Long.class, campaignId, customerId);
+		jdbcTemplate.update("UPDATE send_log SET status = 'SENDING' WHERE send_log_id = ?", sendLogId); // 실제 흐름: 선점 뒤에만 결과를 기록한다
 		sendLogMapper.recordSent(sendLogId, "ses-message-id-bounce");
 
 		sendLogMapper.markBounced("ses-message-id-bounce");
@@ -279,5 +299,49 @@ class SendLogMapperTest {
 		String status = jdbcTemplate.queryForObject(
 			"SELECT status FROM send_log WHERE send_log_id = ?", String.class, sendLogId);
 		assertThat(status).isEqualTo("PENDING");
+	}
+
+	@Test
+	void DRAFT_캠페인의_TEST_발송은_시작_전에도_선점된다() {
+		long draftCampaignId = newOneTimeCampaign(newSegment());
+		jdbcTemplate.update("UPDATE campaign SET status = 'DRAFT' WHERE campaign_id = ?", draftCampaignId);
+		long testCustomerId = newCustomer();
+		sendLogMapper.insertOneTimeBatch(List.of(
+			oneTimeLog(draftCampaignId, customerId),
+			SendLog.builder().campaignId(draftCampaignId).customerId(testCustomerId).recipient("t@withus.local")
+				.channel(Channel.EMAIL).status(SendStatus.PENDING).kind(SendKind.TEST)
+				.priority(SendLog.PRIORITY_TEST).build()));
+
+		List<SendLog> claimed = sendLogMapper.claimBatch();
+
+		assertThat(claimed).extracting(SendLog::getCustomerId)
+			.as("PRD 8.4 테스트 발송만 예외 — CAMPAIGN 행은 막히고 TEST 행은 나간다")
+			.containsOnly(testCustomerId);
+	}
+
+	@Test
+	void 시작_실패로_남은_PENDING만_지우고_SENDING_이상과_TEST는_남긴다() {
+		long campaignId = newOneTimeCampaign(newSegment());
+		long sentCustomerId = newCustomer();
+		long testCustomerId = newCustomer();
+		sendLogMapper.insertOneTimeBatch(List.of(
+			oneTimeLog(campaignId, customerId),
+			oneTimeLog(campaignId, sentCustomerId),
+			SendLog.builder().campaignId(campaignId).customerId(testCustomerId).recipient("t@withus.local")
+				.channel(Channel.EMAIL).status(SendStatus.PENDING).kind(SendKind.TEST)
+				.priority(SendLog.PRIORITY_TEST).build()));
+		jdbcTemplate.update("UPDATE send_log SET status = 'SENDING' WHERE campaign_id = ? AND customer_id = ?",
+			campaignId, sentCustomerId);
+
+		int deleted = sendLogMapper.deleteUnstartedCampaignPending(campaignId);
+
+		assertThat(deleted).isEqualTo(1);
+		assertThat(jdbcTemplate.queryForList("SELECT customer_id FROM send_log WHERE campaign_id = ?", Long.class,
+			campaignId)).containsExactlyInAnyOrder(sentCustomerId, testCustomerId);
+	}
+
+	@Test
+	void 없는_쿠폰의_유효기간_확인은_null이다() {
+		assertThat(sendLogMapper.isCouponValid(-1L)).isNull();
 	}
 }

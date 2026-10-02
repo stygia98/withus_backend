@@ -33,7 +33,8 @@ public interface SendLogMapper {
 
 	/**
 	 * 선점: PENDING 중 priority·send_log_id 순으로 최대 50건을 SENDING 으로 바꾸고 그 행을 돌려준다.
-	 * PAUSED 캠페인 건은 선점 대상에서 제외한다(발송 큐 Plan 15장 A1 — 안 하면 계속 선점·반환을 반복해 다른 캠페인이 밀린다).
+	 * DRAFT·SCHEDULED·PAUSED 캠페인 건은 선점 대상에서 제외한다 — PAUSED 는 발송 큐 Plan 15장 A1(안 하면 계속 선점·반환을 반복해
+	 * 다른 캠페인이 밀린다), DRAFT·SCHEDULED 는 캠페인이 ACTIVE 가 되기 전에 미리 적재된 건이 먼저 나가지 않게 한다(PR #31 리뷰 🔴1).
 	 */
 	List<SendLog> claimBatch();
 
@@ -87,9 +88,15 @@ public interface SendLogMapper {
 	/** 워크플로우 SEND 노드에 연결된 쿠폰 ID — config_json.couponId (없으면 null) */
 	Long findCouponIdByStepId(@Param("stepId") long stepId);
 
-	/** 오늘(Asia/Seoul)이 쿠폰 유효기간(valid_from~valid_to) 안인가 */
-	boolean isCouponValid(@Param("couponId") long couponId);
+	/** 일회성 캠페인의 아직 선점되지 않은 PENDING 적재분 삭제(시작 실패 뒤 재시작할 때 옛 대상이 남지 않게). @return 삭제 건수 */
+	int deleteUnstartedCampaignPending(@Param("campaignId") long campaignId);
+
+	/** 오늘(Asia/Seoul)이 쿠폰 유효기간(valid_from~valid_to) 안인가. 쿠폰 행이 없으면 null */
+	Boolean isCouponValid(@Param("couponId") long couponId);
 
 	/** 재확인 이후 렌더링 단계에서 탈락(쿠폰 유효기간 밖): 종단 SKIPPED(COUPON_INVALID), 재시도하지 않는다 */
 	int recordSkippedCoupon(@Param("sendLogId") long sendLogId);
+
+	/** 전체 PENDING 대기 건수 — 새 캠페인 시작 전 예상 소요 시간 계산용(캠페인 3/4 estimate) */
+	long countPending();
 }
