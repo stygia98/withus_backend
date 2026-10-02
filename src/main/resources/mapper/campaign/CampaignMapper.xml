@@ -26,6 +26,11 @@
 		<include refid="filter"/>
 	</select>
 
+	<select id="findActiveCustomerRegistered" resultType="com.withus.campaign.domain.Campaign">
+		SELECT <include refid="columns"/> FROM campaign
+		WHERE type = 'WORKFLOW' AND trigger_type = 'CUSTOMER_REGISTERED' AND status = 'ACTIVE'
+	</select>
+
 	<select id="findById" resultType="com.withus.campaign.domain.Campaign">
 		SELECT <include refid="columns"/> FROM campaign WHERE campaign_id = #{campaignId}
 	</select>

@@ -21,6 +21,9 @@ public interface CampaignMapper {
 
 	Campaign findById(long campaignId);
 
+	/** 신규 가입 트리거(CUSTOMER_REGISTERED) 워크플로우 중 실행 중(ACTIVE)인 캠페인 */
+	List<Campaign> findActiveCustomerRegistered();
+
 	void insert(Campaign campaign);
 
 	void update(Campaign campaign);

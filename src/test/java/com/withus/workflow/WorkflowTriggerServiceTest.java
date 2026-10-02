@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -20,6 +21,7 @@ import org.mockito.ArgumentCaptor;
 import com.withus.campaign.domain.Campaign;
 import com.withus.campaign.mapper.CampaignMapper;
 import com.withus.common.exception.BusinessException;
+import com.withus.customer.domain.CustomerRegisteredEvent;
 import com.withus.segment.service.SegmentService;
 import com.withus.workflow.domain.NodeType;
 import com.withus.workflow.domain.WorkflowStep;
@@ -71,5 +73,39 @@ class WorkflowTriggerServiceTest {
 
 		assertThatThrownBy(() -> service.startSegmentScheduled(1L)).isInstanceOf(BusinessException.class);
 		verify(instanceMapper, times(0)).insertBatch(anyLong(), anyLong(), anyList());
+	}
+
+	private Campaign registeredCampaign(long campaignId, long segmentId) {
+		Campaign campaign = new Campaign();
+		campaign.setCampaignId(campaignId);
+		campaign.setSegmentId(segmentId);
+		return campaign;
+	}
+
+	@Test
+	void 신규_고객이_세그먼트에_해당하면_인스턴스를_만들고_아니면_만들지_않는다() {
+		when(campaignMapper.findActiveCustomerRegistered())
+			.thenReturn(List.of(registeredCampaign(10L, 100L), registeredCampaign(20L, 200L)));
+		when(segmentService.findTargetCustomers(100L)).thenReturn(List.of(5L, 6L));
+		when(segmentService.findTargetCustomers(200L)).thenReturn(List.of(6L));
+		when(stepMapper.findByCampaignId(10L)).thenReturn(List.of(trigger(42L)));
+
+		service.onCustomerRegistered(new CustomerRegisteredEvent(5L));
+
+		verify(instanceMapper).insertBatch(10L, 42L, List.of(5L));
+		verify(instanceMapper, never()).insertBatch(eq(20L), anyLong(), anyList());
+	}
+
+	@Test
+	void 한_캠페인의_구조_오류가_다른_캠페인_진입을_막지_않는다() {
+		when(campaignMapper.findActiveCustomerRegistered())
+			.thenReturn(List.of(registeredCampaign(10L, 100L), registeredCampaign(20L, 100L)));
+		when(segmentService.findTargetCustomers(100L)).thenReturn(List.of(5L));
+		when(stepMapper.findByCampaignId(10L)).thenReturn(List.of()); // TRIGGER 없음 → 예외
+		when(stepMapper.findByCampaignId(20L)).thenReturn(List.of(trigger(43L)));
+
+		service.onCustomerRegistered(new CustomerRegisteredEvent(5L));
+
+		verify(instanceMapper).insertBatch(20L, 43L, List.of(5L));
 	}
 }

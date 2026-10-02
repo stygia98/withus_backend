@@ -2,12 +2,19 @@ package com.withus.workflow.service;
 
 import java.util.List;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 
 import com.withus.campaign.domain.Campaign;
 import com.withus.campaign.mapper.CampaignMapper;
 import com.withus.common.exception.BusinessException;
 import com.withus.common.exception.CommonErrorCode;
+import com.withus.customer.domain.CustomerRegisteredEvent;
 import com.withus.segment.service.SegmentService;
 import com.withus.workflow.domain.NodeType;
 import com.withus.workflow.domain.WorkflowStep;
@@ -20,6 +27,8 @@ import com.withus.workflow.mapper.WorkflowStepMapper;
  */
 @Service
 public class WorkflowTriggerService {
+
+	private static final Logger log = LoggerFactory.getLogger(WorkflowTriggerService.class);
 
 	/** 10만 건이 하나의 긴 트랜잭션이 되지 않도록 나누는 단위 (워크플로우 Plan 6.1) */
 	private static final int BATCH_SIZE = 500;
@@ -52,6 +61,28 @@ public class WorkflowTriggerService {
 			created += workflowInstanceMapper.insertBatch(campaignId, firstStepId, chunk);
 		}
 		return created;
+	}
+
+	/**
+	 * CUSTOMER_REGISTERED: 개별 등록된 고객이 ACTIVE 캠페인의 세그먼트에 해당하면 인스턴스를 만든다.
+	 * 등록 트랜잭션이 커밋된 뒤 별도 트랜잭션에서 처리한다(워크플로우 Plan 6.2, PL 리뷰 R4) —
+	 * 여기서 실패해도 고객 등록은 롤백되지 않는다. 업로드 등록은 이벤트가 발행되지 않는다(F-01)
+	 */
+	@TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public void onCustomerRegistered(CustomerRegisteredEvent event) {
+		for (Campaign campaign : campaignMapper.findActiveCustomerRegistered()) {
+			try {
+				// ponytail: 세그먼트 전체 조회 후 contains, 등록이 잦아지면 SegmentService.isMember 추가 검토
+				if (segmentService.findTargetCustomers(campaign.getSegmentId()).contains(event.customerId())) {
+					workflowInstanceMapper.insertBatch(campaign.getCampaignId(), findFirstStepId(campaign.getCampaignId()),
+						List.of(event.customerId()));
+				}
+			} catch (RuntimeException e) {
+				// 캠페인 하나의 구조 오류가 다른 캠페인의 진입을 막지 않게 한다
+				log.error("신규 가입 트리거 처리 실패 campaignId={} customerId={}", campaign.getCampaignId(), event.customerId(), e);
+			}
+		}
 	}
 
 	private long findFirstStepId(long campaignId) {
