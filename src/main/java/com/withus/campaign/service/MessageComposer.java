@@ -57,7 +57,7 @@ public class MessageComposer {
 
 		String couponUrl = "";
 		if (couponId != null) {
-			if (!sendLogMapper.isCouponValid(couponId)) {
+			if (!Boolean.TRUE.equals(sendLogMapper.isCouponValid(couponId))) {
 				sendLogMapper.recordSkippedCoupon(sendLog.getSendLogId());
 				return Optional.empty();
 			}

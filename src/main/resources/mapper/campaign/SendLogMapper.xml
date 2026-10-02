@@ -65,16 +65,22 @@
 	</insert>
 
 	<!-- UPDATE ... RETURNING 은 select 로 선언해야 ResultSet 을 받는다 (MyBatis+PostgreSQL 관용 패턴) -->
+	<!-- 시작 전에 적재됐다가 시작이 실패해 남은 일회성 PENDING 을 지운다. SENDING 이상·TEST·워크플로우 건은 건드리지 않는다 -->
+	<delete id="deleteUnstartedCampaignPending">
+		DELETE FROM send_log
+		WHERE campaign_id = #{campaignId} AND kind = 'CAMPAIGN' AND status = 'PENDING' AND instance_id IS NULL
+	</delete>
+
 	<select id="claimBatch" resultMap="sendLogResultMap">
 		WITH claimed AS (
 			UPDATE send_log SET status = 'SENDING', updated_at = now()
 			WHERE send_log_id IN (
 				SELECT send_log_id FROM send_log
 				WHERE status = 'PENDING' AND (next_attempt_at IS NULL OR next_attempt_at &lt;= now())
-				  AND NOT EXISTS (
+				  AND (send_log.kind <> 'CAMPAIGN' OR NOT EXISTS (
 				      SELECT 1 FROM campaign c
 				      WHERE c.campaign_id = send_log.campaign_id AND c.status IN ('DRAFT', 'SCHEDULED', 'PAUSED')
-				  )
+				  ))
 				ORDER BY priority, send_log_id
 				LIMIT 50
 				FOR UPDATE SKIP LOCKED
@@ -146,7 +152,7 @@
 		SELECT (config_json ->> 'couponId')::bigint FROM workflow_step WHERE step_id = #{stepId}
 	</select>
 
-	<select id="isCouponValid" resultType="boolean">
+	<select id="isCouponValid" resultType="java.lang.Boolean">
 		SELECT CURRENT_DATE BETWEEN valid_from AND valid_to FROM coupon WHERE coupon_id = #{couponId}
 	</select>
 

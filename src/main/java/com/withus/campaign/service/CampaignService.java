@@ -91,6 +91,7 @@ public class CampaignService {
 	public Campaign create(Campaign campaign, long memberId) {
 		validateTypeFields(campaign);
 		requireSegment(campaign.getSegmentId());
+		requireCoupon(campaign.getCouponId());
 		if (campaign.getType() == CampaignType.ONE_TIME) {
 			validateCouponRequirement(campaign);
 		}
@@ -113,6 +114,7 @@ public class CampaignService {
 		existing.setTriggerType(changes.getTriggerType());
 		validateTypeFields(existing);
 		requireSegment(existing.getSegmentId());
+		requireCoupon(existing.getCouponId());
 		if (existing.getType() == CampaignType.ONE_TIME) {
 			validateCouponRequirement(existing);
 		}
@@ -229,7 +231,10 @@ public class CampaignService {
 			// 적재를 ACTIVE 전환보다 먼저 한다(PR #31 리뷰 🔴1). 반대로 하면 전환~적재 사이에 CampaignCompleteJob 이
 			// "PENDING·SENDING 없음"으로 보고 발송 0건인 채 COMPLETED 로 만들 수 있다. 적재된 건은 캠페인이 ACTIVE 가
 			// 되기 전에는 발송 큐가 선점하지 않고(claimBatch), 적재는 uq_send_log_one_time 으로 멱등이라
-			// 도중에 실패해도 상태는 그대로(DRAFT·SCHEDULED)라 다시 시작하면 이어서 적재된다
+			// 도중에 실패해도 상태는 그대로(DRAFT·SCHEDULED)라 다시 시작하면 남은 PENDING 을 지우고 새로 적재한다
+			// 이전 시작이 적재 도중 실패해 남은 PENDING 을 먼저 지운다(PR #31 재리뷰 🟡1). 그 사이 세그먼트·템플릿 채널이
+			// 바뀌었다면 ON CONFLICT DO NOTHING 이 옛 대상·옛 수신처 행을 그대로 남겨 ACTIVE 뒤에 발송되기 때문이다
+			sendLogMapper.deleteUnstartedCampaignPending(campaignId);
 			Template template = requireTemplate(campaign.getTemplateId());
 			List<Long> targetIds = segmentService.findTargetCustomers(campaign.getSegmentId());
 			sendQueueService.enqueueOneTime(campaignId, targetIds, template.getChannel(), SendKind.CAMPAIGN);
@@ -248,6 +253,12 @@ public class CampaignService {
 			throw new BusinessException(TemplateErrorCode.TEMPLATE_NOT_FOUND);
 		}
 		return template;
+	}
+
+	private void requireCoupon(Long couponId) {
+		if (couponId != null && !campaignMapper.existsCoupon(couponId)) {
+			throw new BusinessException(CommonErrorCode.COMMON_INVALID_INPUT, "존재하지 않는 쿠폰입니다.", null);
+		}
 	}
 
 	private void requireSegment(Long segmentId) {
@@ -270,7 +281,7 @@ public class CampaignService {
 					Map.of("nextAvailableAt", result.nextAvailableAt()));
 			}
 		}
-		if (campaign.getCouponId() != null && !sendLogMapper.isCouponValid(campaign.getCouponId())) {
+		if (campaign.getCouponId() != null && !Boolean.TRUE.equals(sendLogMapper.isCouponValid(campaign.getCouponId()))) {
 			throw new BusinessException(CouponErrorCode.COUPON_OUT_OF_PERIOD);
 		}
 	}

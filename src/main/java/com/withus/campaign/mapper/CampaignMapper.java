@@ -29,6 +29,9 @@ public interface CampaignMapper {
 	/** 세그먼트 존재 확인(segment 테이블 SELECT) — 없는 ID 가 FK 오류(500)로 새는 걸 막는다 */
 	boolean existsSegment(@Param("segmentId") long segmentId);
 
+	/** 쿠폰 존재 확인(coupon 테이블 SELECT) — 없는 ID 가 FK 오류(500)로 새는 걸 막는다 */
+	boolean existsCoupon(@Param("couponId") long couponId);
+
 	/**
 	 * 상태 변경(낙관적 검사): 현재 상태가 expectedStatus 와 같을 때만 바뀐다.
 	 * @return 바뀐 행 수 — 0 이면 그 사이 다른 요청이 상태를 바꿨다는 뜻(CAMPAIGN_INVALID_STATUS)

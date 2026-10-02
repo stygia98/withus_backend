@@ -135,7 +135,9 @@ class CampaignScheduleJobTest {
 
 	@Test
 	void 대상이_없는_캠페인도_시작_즉시_완료_대상이_된다() {
-		// 대상 고객을 만들지 않는다 — enqueueOneTime 이 0건 적재해도 started_at 은 설정됨
+		// 아무도 맞지 않는 규칙으로 바꾼다 — 시드 고객이 있는 DB 에서도 대상 0명이어야 PENDING 이 안 생긴다
+		jdbc.update("UPDATE segment_rule SET rule_json = '{\"operator\":\"AND\",\"groups\":[{\"operator\":\"AND\","
+			+ "\"conditions\":[{\"field\":\"age\",\"op\":\"GT\",\"value\":\"200\"}]}]}'::jsonb WHERE segment_id = ?", segmentId);
 		long campaignId = scheduledCampaign(OffsetDateTime.now().minusMinutes(1));
 		campaignScheduleJob.activateScheduled();
 
