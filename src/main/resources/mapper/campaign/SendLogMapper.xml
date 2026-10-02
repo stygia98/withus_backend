@@ -84,14 +84,16 @@
 		SELECT * FROM claimed ORDER BY priority, send_log_id
 	</select>
 
+	<!-- 결과 기록 UPDATE 는 전부 AND status = 'SENDING' 을 건다: 응답이 지연돼 recoverStuckSending 이 먼저
+	     FAILED(UNKNOWN_RESULT) 로 처리한 건을 늦은 결과가 PENDING 으로 되돌려 재발송하는 일을 막는다 (PR #21 리뷰) -->
 	<update id="recordSent">
 		UPDATE send_log SET status = 'SENT', sent_at = now(), provider_message_id = #{providerMessageId}
-		WHERE send_log_id = #{sendLogId}
+		WHERE send_log_id = #{sendLogId} AND status = 'SENDING'
 	</update>
 
 	<update id="recordFailed">
 		UPDATE send_log SET status = 'FAILED', error_message = #{errorMessage}
-		WHERE send_log_id = #{sendLogId}
+		WHERE send_log_id = #{sendLogId} AND status = 'SENDING'
 	</update>
 
 	<select id="findByProviderMessageId" resultMap="sendLogResultMap">
@@ -102,22 +104,25 @@
 		SELECT status FROM campaign WHERE campaign_id = #{campaignId}
 	</select>
 
+	<!-- 사유를 error_message 에 남기고 이전 재시도의 error_message 는 덮어쓴다(원인이 잘못 보이지 않게, PR #21 리뷰) -->
 	<update id="recordSkipped">
-		UPDATE send_log SET status = 'SKIPPED' WHERE send_log_id = #{sendLogId}
+		UPDATE send_log SET status = 'SKIPPED', error_message = #{reason}
+		WHERE send_log_id = #{sendLogId} AND status = 'SENDING'
 	</update>
 
 	<update id="revertToPending">
-		UPDATE send_log SET status = 'PENDING' WHERE send_log_id = #{sendLogId}
+		UPDATE send_log SET status = 'PENDING' WHERE send_log_id = #{sendLogId} AND status = 'SENDING'
 	</update>
 
 	<update id="holdForSendWindow">
-		UPDATE send_log SET status = 'PENDING', next_attempt_at = #{nextAttemptAt} WHERE send_log_id = #{sendLogId}
+		UPDATE send_log SET status = 'PENDING', next_attempt_at = #{nextAttemptAt}
+		WHERE send_log_id = #{sendLogId} AND status = 'SENDING'
 	</update>
 
 	<update id="recordRetry">
 		UPDATE send_log SET status = 'PENDING', attempt_count = attempt_count + 1,
 			next_attempt_at = #{nextAttemptAt}, error_message = #{errorMessage}
-		WHERE send_log_id = #{sendLogId}
+		WHERE send_log_id = #{sendLogId} AND status = 'SENDING'
 	</update>
 
 	<update id="recoverStuckSending">
@@ -142,7 +147,8 @@
 	</select>
 
 	<update id="recordSkippedCoupon">
-		UPDATE send_log SET status = 'SKIPPED', error_message = 'COUPON_INVALID' WHERE send_log_id = #{sendLogId}
+		UPDATE send_log SET status = 'SKIPPED', error_message = 'COUPON_INVALID'
+		WHERE send_log_id = #{sendLogId} AND status = 'SENDING'
 	</update>
 
 	<!-- 새 캠페인을 시작하기 전, 이미 밀려 있는 대기분(캠페인 3/4 estimate) -->
