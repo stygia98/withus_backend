@@ -48,14 +48,22 @@ public interface WorkflowInstanceMapper {
 	/** 발송 결과가 도착해 기다리던 인스턴스의 실행 시각을 채운다. next_run_at 이 비어 있는 WAITING 만 — 이미 채워진 값은 덮어쓰지 않는다 */
 	int wake(@Param("instanceId") long instanceId, @Param("nextRunAt") OffsetDateTime nextRunAt);
 
+	/** 캠페인 수동 종료: 진행 중(WAITING·RUNNING)인 인스턴스를 CANCELLED 로 바꾼다(PRD 6.6). @return 취소된 건수 */
+	int cancelActiveByCampaign(@Param("campaignId") long campaignId);
+
+	/** status 가 null 이면 전체. instance_id 순 */
+	List<WorkflowInstance> findByCampaign(@Param("campaignId") long campaignId,
+		@Param("status") com.withus.workflow.domain.InstanceStatus status, @Param("offset") int offset,
+		@Param("limit") int limit);
+
+	long countByCampaign(@Param("campaignId") long campaignId,
+		@Param("status") com.withus.workflow.domain.InstanceStatus status);
+
 	/**
 	 * 트리거 일괄 생성: customerIds 마다 인스턴스를 WAITING(next_run_at=now) 으로 만든다.
 	 * uq_workflow_instance(campaign_id, customer_id) 충돌은 건너뛰어 재실행해도 멱등하다(워크플로우 Plan 6.1).
 	 * @return 실제로 insert 된 건수
 	 */
-	/** 캠페인 수동 종료: 진행 중(WAITING·RUNNING)인 인스턴스를 CANCELLED 로 바꾼다(PRD 6.6). @return 취소된 건수 */
-	int cancelActiveByCampaign(@Param("campaignId") long campaignId);
-
 	int insertBatch(@Param("campaignId") long campaignId, @Param("stepId") long stepId,
 		@Param("customerIds") List<Long> customerIds);
 }

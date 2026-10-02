@@ -4,6 +4,7 @@ import java.time.Clock;
 import java.time.LocalTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
@@ -29,6 +30,8 @@ import com.withus.common.response.PageResponse;
 import com.withus.coupon.domain.CouponErrorCode;
 import com.withus.segment.service.SegmentService;
 import com.withus.workflow.mapper.WorkflowInstanceMapper;
+import com.withus.workflow.mapper.WorkflowStepMapper;
+import com.withus.workflow.domain.WorkflowStep;
 import com.withus.workflow.service.WorkflowTriggerService;
 
 /**
@@ -53,6 +56,7 @@ public class CampaignService {
 	private final SendQueueService sendQueueService;
 	private final WorkflowTriggerService workflowTriggerService;
 	private final WorkflowInstanceMapper workflowInstanceMapper;
+	private final WorkflowStepMapper workflowStepMapper;
 	private final SendWindow sendWindow;
 	private final int maxSendRate;
 	private Clock clock = Clock.system(ZoneId.of("Asia/Seoul"));
@@ -60,6 +64,7 @@ public class CampaignService {
 	public CampaignService(CampaignMapper campaignMapper, TemplateMapper templateMapper, SendLogMapper sendLogMapper,
 			SegmentService segmentService, SendQueueService sendQueueService, WorkflowTriggerService workflowTriggerService,
 			WorkflowInstanceMapper workflowInstanceMapper,
+			WorkflowStepMapper workflowStepMapper,
 			@Value("${withus.send-window.start}") String sendWindowStart,
 			@Value("${withus.send-window.end}") String sendWindowEnd,
 			@Value("${ses.max-send-rate}") int maxSendRate) {
@@ -70,6 +75,7 @@ public class CampaignService {
 		this.sendQueueService = sendQueueService;
 		this.workflowTriggerService = workflowTriggerService;
 		this.workflowInstanceMapper = workflowInstanceMapper;
+		this.workflowStepMapper = workflowStepMapper;
 		this.sendWindow = new SendWindow(LocalTime.parse(sendWindowStart), LocalTime.parse(sendWindowEnd));
 		this.maxSendRate = maxSendRate;
 	}
@@ -257,6 +263,54 @@ public class CampaignService {
 		workflowInstanceMapper.cancelActiveByCampaign(campaignId);
 		campaign.setStatus(CampaignStatus.COMPLETED);
 		return campaign;
+	}
+
+	/**
+	 * 새 DRAFT 로 복제한다(API_SPEC 6장). 템플릿·쿠폰·세그먼트 참조는 그대로 두고, 워크플로우는 노드를 새
+	 * step_id 로 복사하며 next·yes·no 를 새 ID 로 다시 잇는다. 인스턴스·발송 이력은 복사하지 않는다
+	 */
+	@Transactional
+	public Campaign duplicate(long campaignId, long memberId) {
+		Campaign source = getOrThrow(campaignId);
+		Campaign copy = new Campaign();
+		copy.setName(source.getName() + " (복사)");
+		copy.setType(source.getType());
+		copy.setSegmentId(source.getSegmentId());
+		copy.setTemplateId(source.getTemplateId());
+		copy.setCouponId(source.getCouponId());
+		copy.setTriggerType(source.getTriggerType());
+		copy.setStatus(CampaignStatus.DRAFT);
+		copy.setCreatedBy(memberId);
+		campaignMapper.insert(copy);
+		if (source.getType() == CampaignType.WORKFLOW) {
+			copySteps(campaignId, copy.getCampaignId());
+		}
+		return copy;
+	}
+
+	private void copySteps(long fromCampaignId, long toCampaignId) {
+		List<WorkflowStep> originals = workflowStepMapper.findByCampaignId(fromCampaignId);
+		if (originals.isEmpty()) {
+			return;
+		}
+		List<WorkflowStep> copies = originals.stream().map(o -> {
+			WorkflowStep step = new WorkflowStep();
+			step.setCampaignId(toCampaignId);
+			step.setNodeType(o.getNodeType());
+			step.setConfigJson(o.getConfigJson());
+			step.setDepth(o.getDepth());
+			return step;
+		}).toList();
+		workflowStepMapper.insertBatch(copies);
+		Map<Long, Long> newIdByOldId = new HashMap<>();
+		for (int i = 0; i < originals.size(); i++) {
+			newIdByOldId.put(originals.get(i).getStepId(), copies.get(i).getStepId());
+		}
+		for (int i = 0; i < originals.size(); i++) {
+			WorkflowStep o = originals.get(i);
+			workflowStepMapper.updateLinks(copies.get(i).getStepId(), newIdByOldId.get(o.getNextStepId()),
+				newIdByOldId.get(o.getYesStepId()), newIdByOldId.get(o.getNoStepId()));
+		}
 	}
 
 	private Campaign transition(long campaignId, CampaignStatus from, CampaignStatus to, String message) {

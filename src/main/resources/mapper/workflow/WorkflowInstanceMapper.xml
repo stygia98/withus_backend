@@ -65,6 +65,20 @@
 		WHERE campaign_id = #{campaignId} AND status IN ('WAITING', 'RUNNING')
 	</update>
 
+	<sql id="byCampaign">
+		WHERE campaign_id = #{campaignId}
+		<if test="status != null">AND status = #{status}</if>
+	</sql>
+
+	<select id="findByCampaign" resultType="com.withus.workflow.domain.WorkflowInstance">
+		SELECT * FROM workflow_instance <include refid="byCampaign"/>
+		ORDER BY instance_id LIMIT #{limit} OFFSET #{offset}
+	</select>
+
+	<select id="countByCampaign" resultType="long">
+		SELECT count(*) FROM workflow_instance <include refid="byCampaign"/>
+	</select>
+
 	<insert id="insertBatch">
 		INSERT INTO workflow_instance (campaign_id, customer_id, current_step_id, status, next_run_at)
 		SELECT #{campaignId}, c.customer_id, #{stepId}, 'WAITING', now()

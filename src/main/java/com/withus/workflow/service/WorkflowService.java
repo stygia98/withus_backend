@@ -31,7 +31,11 @@ import com.withus.workflow.dto.WorkflowResponse;
 import com.withus.workflow.dto.WorkflowSaveRequest;
 import com.withus.workflow.dto.WorkflowStepRequest;
 import com.withus.workflow.dto.WorkflowStepResponse;
+import com.withus.workflow.domain.InstanceStatus;
+import com.withus.workflow.dto.WorkflowInstanceResponse;
+import com.withus.workflow.mapper.WorkflowInstanceMapper;
 import com.withus.workflow.mapper.WorkflowStepMapper;
+import com.withus.common.response.PageResponse;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -46,9 +50,12 @@ public class WorkflowService {
 	private final WorkflowValidator workflowValidator;
 	private final ObjectMapper objectMapper;
 
-	public WorkflowService(WorkflowStepMapper workflowStepMapper, CampaignService campaignService,
-			TemplateMapper templateMapper, SendLogMapper sendLogMapper, WorkflowValidator workflowValidator,
-			ObjectMapper objectMapper) {
+	private final WorkflowInstanceMapper workflowInstanceMapper;
+
+	public WorkflowService(WorkflowStepMapper workflowStepMapper, WorkflowInstanceMapper workflowInstanceMapper,
+			CampaignService campaignService, TemplateMapper templateMapper, SendLogMapper sendLogMapper,
+			WorkflowValidator workflowValidator, ObjectMapper objectMapper) {
+		this.workflowInstanceMapper = workflowInstanceMapper;
 		this.workflowStepMapper = workflowStepMapper;
 		this.campaignService = campaignService;
 		this.templateMapper = templateMapper;
@@ -114,6 +121,19 @@ public class WorkflowService {
 		}
 
 		return get(campaignId);
+	}
+
+	/** 캠페인의 인스턴스 현황 (status 필터, 페이징) */
+	public PageResponse<WorkflowInstanceResponse> listInstances(long campaignId, InstanceStatus status, int page,
+			int size) {
+		requireWorkflow(campaignService.getOrThrow(campaignId));
+		if (page < 0 || size < 1 || size > 100) {
+			throw new BusinessException(CommonErrorCode.COMMON_INVALID_INPUT, "page 는 0 이상, size 는 1~100", null);
+		}
+		List<WorkflowInstanceResponse> content = workflowInstanceMapper
+			.findByCampaign(campaignId, status, page * size, size).stream().map(WorkflowInstanceResponse::from)
+			.toList();
+		return PageResponse.of(content, page, size, workflowInstanceMapper.countByCampaign(campaignId, status));
 	}
 
 	private void requireWorkflow(Campaign campaign) {

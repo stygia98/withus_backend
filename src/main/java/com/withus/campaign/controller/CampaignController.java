@@ -129,6 +129,14 @@ public class CampaignController {
 		return ApiResponse.ok(CampaignResponse.from(campaignService.resume(campaignId)));
 	}
 
+	@Operation(summary = "복제", description = "새 DRAFT 로 복제한다. 워크플로우는 구조(노드)까지 복사하고 인스턴스·발송 이력은 복사하지 않는다.")
+	@PreAuthorize("hasAnyRole('OWNER','MANAGER')")
+	@PostMapping("/{campaignId}/duplicate")
+	public ApiResponse<CampaignResponse> duplicate(@PathVariable long campaignId,
+		@AuthenticationPrincipal AuthMember me) {
+		return ApiResponse.ok(CampaignResponse.from(campaignService.duplicate(campaignId, me.memberId())));
+	}
+
 	@Operation(summary = "종료", description = "ACTIVE·PAUSED → COMPLETED. 진행 중 인스턴스는 CANCELLED. 그 외 상태면 CAMPAIGN_INVALID_STATUS(409).")
 	@PreAuthorize("hasAnyRole('OWNER','MANAGER')")
 	@PostMapping("/{campaignId}/complete")

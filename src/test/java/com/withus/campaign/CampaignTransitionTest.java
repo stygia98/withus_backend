@@ -21,6 +21,8 @@ import com.withus.campaign.service.SendQueueService;
 import com.withus.common.exception.BusinessException;
 import com.withus.segment.service.SegmentService;
 import com.withus.workflow.mapper.WorkflowInstanceMapper;
+import com.withus.workflow.mapper.WorkflowStepMapper;
+import com.withus.workflow.domain.WorkflowStep;
 import com.withus.workflow.service.WorkflowTriggerService;
 
 /** 일시정지·재개·종료 (상태 전이 1/3) — 낙관적 검사 결과(바뀐 행 수)에 따른 분기. DB 없이 실행된다 */
@@ -28,9 +30,10 @@ class CampaignTransitionTest {
 
 	CampaignMapper campaignMapper = mock(CampaignMapper.class);
 	WorkflowInstanceMapper instanceMapper = mock(WorkflowInstanceMapper.class);
+	WorkflowStepMapper stepMapper = mock(WorkflowStepMapper.class);
 	CampaignService service = new CampaignService(campaignMapper, mock(TemplateMapper.class),
 		mock(SendLogMapper.class), mock(SegmentService.class), mock(SendQueueService.class),
-		mock(WorkflowTriggerService.class), instanceMapper, "08:00", "20:50", 14);
+		mock(WorkflowTriggerService.class), instanceMapper, stepMapper, "08:00", "20:50", 14);
 
 	CampaignTransitionTest() {
 		Campaign campaign = new Campaign();
@@ -71,5 +74,43 @@ class CampaignTransitionTest {
 
 		assertThatThrownBy(() -> service.complete(1L)).isInstanceOf(BusinessException.class);
 		verify(instanceMapper, never()).cancelActiveByCampaign(anyLong());
+	}
+
+	@Test
+	void 복제하면_DRAFT이고_워크플로우_노드는_새_ID로_연결이_다시_이어진다() {
+		Campaign source = new Campaign();
+		source.setCampaignId(1L);
+		source.setName("여정");
+		source.setType(com.withus.campaign.domain.CampaignType.WORKFLOW);
+		source.setStatus(CampaignStatus.ACTIVE);
+		when(campaignMapper.findById(1L)).thenReturn(source);
+		org.mockito.Mockito.doAnswer(i -> {
+			((Campaign) i.getArgument(0)).setCampaignId(2L);
+			return null;
+		}).when(campaignMapper).insert(org.mockito.ArgumentMatchers.any());
+		WorkflowStep trigger = step(10L, com.withus.workflow.domain.NodeType.TRIGGER, 11L);
+		WorkflowStep end = step(11L, com.withus.workflow.domain.NodeType.END, null);
+		when(stepMapper.findByCampaignId(1L)).thenReturn(java.util.List.of(trigger, end));
+		org.mockito.Mockito.doAnswer(i -> {
+			java.util.List<WorkflowStep> copies = i.getArgument(0);
+			copies.get(0).setStepId(20L);
+			copies.get(1).setStepId(21L);
+			return 2;
+		}).when(stepMapper).insertBatch(org.mockito.ArgumentMatchers.anyList());
+
+		Campaign copy = service.duplicate(1L, 5L);
+
+		assertThat(copy.getStatus()).isEqualTo(CampaignStatus.DRAFT);
+		assertThat(copy.getName()).isEqualTo("여정 (복사)");
+		verify(stepMapper).updateLinks(20L, 21L, null, null); // 원본 10→11 이 새 20→21 로
+		verify(stepMapper).updateLinks(21L, null, null, null);
+	}
+
+	private WorkflowStep step(long id, com.withus.workflow.domain.NodeType type, Long next) {
+		WorkflowStep step = new WorkflowStep();
+		step.setStepId(id);
+		step.setNodeType(type);
+		step.setNextStepId(next);
+		return step;
 	}
 }
