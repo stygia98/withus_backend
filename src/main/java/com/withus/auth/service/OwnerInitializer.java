@@ -11,6 +11,7 @@ import org.springframework.stereotype.Component;
 import com.withus.auth.domain.Member;
 import com.withus.auth.domain.Role;
 import com.withus.auth.mapper.MemberMapper;
+import com.withus.common.normalize.Emails;
 
 /**
  * 최초 OWNER 계정 1개를 환경변수(OWNER_EMAIL, OWNER_PASSWORD)로 만든다 (PRD 3장)
@@ -44,7 +45,7 @@ public class OwnerInitializer implements ApplicationRunner {
 			return;
 		}
 		Member owner = new Member();
-		owner.setEmail(AuthService.normalizeEmail(ownerEmail));
+		owner.setEmail(Emails.normalize(ownerEmail));
 		owner.setPassword(passwordEncoder.encode(ownerPassword));
 		owner.setName("관리자");
 		owner.setRole(Role.OWNER);

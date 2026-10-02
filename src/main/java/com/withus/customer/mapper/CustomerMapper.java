@@ -17,6 +17,9 @@ public interface CustomerMapper {
 	/** 삭제되지 않은 고객만 */
 	Customer findActiveById(long customerId);
 
+	/** 삭제된 고객 포함 (수신거부 링크는 삭제 후에도 동작한다) */
+	Customer findById(long customerId);
+
 	/** 삭제되지 않은 고객 중 같은 이메일 존재 여부. excludeId 는 수정 시 자기 자신 제외 */
 	boolean existsActiveEmail(@Param("email") String email, @Param("excludeId") Long excludeId);
 
@@ -46,6 +49,13 @@ public interface CustomerMapper {
 		@Param("yn") String yn);
 
 	void deleteSuppression(@Param("channel") Channel channel, @Param("value") String value);
+
+	/** 이미 있으면 그대로 둔다 (처음 사유 유지). reason: UNSUBSCRIBE, BOUNCE, COMPLAINT */
+	void insertSuppression(@Param("channel") Channel channel, @Param("value") String value,
+		@Param("reason") String reason);
+
+	/** 그 채널 값이 같고 동의 Y 인 삭제되지 않은 고객을 N 으로. 바뀐 고객 ID */
+	List<Long> rejectConsentByValue(@Param("channel") Channel channel, @Param("value") String value);
 
 	/** 최신순 */
 	List<ConsentHistory> findConsentHistory(long customerId);
