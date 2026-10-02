@@ -7,7 +7,6 @@ import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.withus.campaign.domain.CustomerRecipient;
@@ -37,16 +36,16 @@ public class SendQueueService {
 		this.sendLogMapper = sendLogMapper;
 		this.consentService = consentService;
 		this.transactionTemplate = new TransactionTemplate(transactionManager);
-		// 기본 전파(REQUIRED)면 호출자가 @Transactional 일 때 청크가 그 트랜잭션에 합류해 10만 건이 한 트랜잭션이
-		// 된다(발송 큐 Plan 2장 "긴 트랜잭션 금지", PR #21 리뷰) — 청크마다 새 트랜잭션으로 커밋한다
-		this.transactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
 	}
 
 	/**
 	 * 일회성·A/B 캠페인, F-12 수신동의 안내 등 instanceId 없는 적재. 대상을 500건씩 나눠 짧은 트랜잭션으로 적재한다.
 	 * 같은 (campaignId, customerId) 로 다시 호출해도 멱등하다(이미 적재된 건 건너뜀).
 	 * priority 는 호출자가 넘기지 않고 kind 로 정한다(발송 큐 Plan 2장): TEST 1, NOTICE 2, CAMPAIGN 3 —
-	 * (NOTICE, 3) 같은 잘못된 조합을 만들 수 없게 한다
+	 * (NOTICE, 3) 같은 잘못된 조합을 만들 수 없게 한다.
+	 * <p><b>호출자는 @Transactional 안에서 부르면 안 된다</b> — 청크의 TransactionTemplate 이 기본 전파(REQUIRED)라
+	 * 호출자 트랜잭션에 합류해 10만 건이 한 트랜잭션이 된다(Plan 2장 "긴 트랜잭션 금지"). 현재 호출자
+	 * (CampaignService.start, 예약 스케줄러)는 모두 트랜잭션이 없다. REQUIRES_NEW 로 강제하는 안은 PL 확인 대기
 	 * @return 새로 쌓인 건수(PENDING + SKIPPED)
 	 */
 	public int enqueueOneTime(Long campaignId, List<Long> customerIds, Channel channel, SendKind kind) {

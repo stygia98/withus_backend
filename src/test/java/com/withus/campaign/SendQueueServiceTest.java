@@ -22,9 +22,9 @@ import com.withus.common.domain.Channel;
 
 /**
  * 발송 큐 적재 (발송 큐 Plan 2장) — 멱등 적재, 수신동의 N 은 SKIPPED, 500건 배치 분할, kind 별 priority.
- * @Transactional 을 쓰지 않는다: enqueueOneTime 의 청크는 호출자 트랜잭션에 합류하지 않고 REQUIRES_NEW 로
- * 별도 커밋되므로(PR #21 리뷰, 긴 트랜잭션 금지) 테스트가 만든 미커밋 행을 볼 수 없다 — 실제로 커밋하고
- * 끝나고 직접 정리한다. 백그라운드 SendDispatcher 가 적재된 PENDING 을 가져가지 않도록 끈다
+ * @Transactional 을 쓰지 않는다: enqueueOneTime 은 호출자가 트랜잭션 밖에서 부르는 것이 계약이고(청크마다
+ * 짧게 커밋, 긴 트랜잭션 금지) 실제 호출자도 그렇다 — 같은 조건으로 실제 커밋을 검증하고 끝나고 직접
+ * 정리한다. 백그라운드 SendDispatcher 가 적재된 PENDING 을 가져가지 않도록 끈다
  */
 @SpringBootTest(properties = "withus.scheduler.send-dispatcher.enabled=false")
 class SendQueueServiceTest {
