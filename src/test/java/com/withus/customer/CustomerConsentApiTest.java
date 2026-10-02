@@ -2,7 +2,6 @@ package com.withus.customer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -29,6 +28,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.jayway.jsonpath.JsonPath;
 import com.withus.auth.domain.Role;
 import com.withus.auth.security.AuthMember;
+import com.withus.common.TestCsrf;
 
 /** 수신동의 변경·이력 (PRD 7장, API_SPEC 3장, CLAUDE.md 6장 10번) */
 @SpringBootTest
@@ -102,7 +102,7 @@ class CustomerConsentApiTest {
 		consent(Long.MAX_VALUE, "EMAIL", "Y", null).andExpect(status().isNotFound());
 
 		mvc.perform(patch("/api/v1/customers/" + id + "/consent").contentType(MediaType.APPLICATION_JSON)
-				.content("{\"channel\":\"EMAIL\",\"consent\":\"Y\"}").with(auth(Role.STAFF)).with(csrf()))
+				.content("{\"channel\":\"EMAIL\",\"consent\":\"Y\"}").with(auth(Role.STAFF)).with(TestCsrf.issue(mvc)))
 			.andExpect(status().isForbidden());
 	}
 
@@ -123,7 +123,7 @@ class CustomerConsentApiTest {
 	}
 
 	private ResultActions call(MockHttpServletRequestBuilder request) throws Exception {
-		return mvc.perform(request.contentType(MediaType.APPLICATION_JSON).with(auth(Role.MANAGER)).with(csrf()));
+		return mvc.perform(request.contentType(MediaType.APPLICATION_JSON).with(auth(Role.MANAGER)).with(TestCsrf.issue(mvc)));
 	}
 
 	private static org.springframework.test.web.servlet.request.RequestPostProcessor auth(Role role) {

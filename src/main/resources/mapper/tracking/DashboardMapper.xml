@@ -18,12 +18,7 @@
 			<if test="stepId != null">
 			  AND s.step_id = #{stepId}
 			</if>
-			<if test="from != null">
-			  AND COALESCE(s.sent_at, s.updated_at) &gt;= #{from}
-			</if>
-			<if test="to != null">
-			  AND COALESCE(s.sent_at, s.updated_at) &lt; #{to}
-			</if>
+			<include refid="sendPeriod"/>
 		),
 		sent AS (
 			SELECT send_log_id, customer_id FROM base WHERE status = 'SENT'
@@ -41,6 +36,53 @@
 			  JOIN coupon_issue ci ON ci.send_log_id = x.send_log_id
 			  WHERE ci.used_at IS NOT NULL) AS coupon_used
 	</select>
+
+	<!--
+		단계별 KPI 를 한 번에 집계한다 (단계마다 sendStats 를 부르면 단계 수만큼 send_log 를 훑는다).
+		지표 정의는 sendStats 와 같다 — 성공 발송 중 사람 이벤트·쿠폰 사용이 있는 고유 고객 수.
+	-->
+	<select id="sendStatsByStep" resultType="com.withus.tracking.domain.StepSendStats">
+		WITH base AS (
+			SELECT s.send_log_id, s.step_id, s.customer_id, s.status
+			FROM send_log s
+			WHERE s.kind = 'CAMPAIGN'
+			  AND s.status IN ('SENT', 'BOUNCED', 'FAILED')
+			  AND s.campaign_id = #{campaignId}
+			  AND s.step_id IS NOT NULL
+			<include refid="sendPeriod"/>
+		),
+		flags AS (
+			SELECT b.step_id, b.customer_id, b.status,
+			       EXISTS (SELECT 1 FROM track_event e
+			               WHERE e.send_log_id = b.send_log_id AND e.event_type = 'OPEN' AND e.bot_yn = 'N')  AS opened,
+			       EXISTS (SELECT 1 FROM track_event e
+			               WHERE e.send_log_id = b.send_log_id AND e.event_type = 'CLICK' AND e.bot_yn = 'N') AS clicked,
+			       EXISTS (SELECT 1 FROM coupon_issue ci
+			               WHERE ci.send_log_id = b.send_log_id AND ci.used_at IS NOT NULL)                AS coupon_used
+			FROM base b
+		)
+		SELECT step_id,
+		       count(*)                                                               AS attempted,
+		       count(*) FILTER (WHERE status = 'SENT')                                AS sent,
+		       count(DISTINCT customer_id) FILTER (WHERE status = 'SENT' AND opened)      AS unique_opens,
+		       count(DISTINCT customer_id) FILTER (WHERE status = 'SENT' AND clicked)     AS unique_clicks,
+		       count(DISTINCT customer_id) FILTER (WHERE status = 'SENT' AND coupon_used) AS coupon_used
+		FROM flags
+		GROUP BY step_id
+	</select>
+
+	<!--
+		기간 판정 시각: 성공·반송은 발송 시각, 실패는 적재 시각(created_at).
+		실패 건의 updated_at 은 이후 처리 때마다 바뀌어 같은 기간 조회 결과가 달라질 수 있어 쓰지 않는다.
+	-->
+	<sql id="sendPeriod">
+		<if test="from != null">
+		  AND COALESCE(s.sent_at, s.created_at) &gt;= #{from}
+		</if>
+		<if test="to != null">
+		  AND COALESCE(s.sent_at, s.created_at) &lt; #{to}
+		</if>
+	</sql>
 
 	<!-- 발송이 없는 날도 0 으로 나오도록 날짜 뼈대를 먼저 만든다 (세션 타임존 Asia/Seoul) -->
 	<select id="dailySends" resultType="com.withus.tracking.domain.DailySendRow">

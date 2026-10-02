@@ -66,6 +66,9 @@ public interface CustomerMapper {
 	 */
 	boolean isSendable(@Param("customerId") long customerId, @Param("channel") Channel channel);
 
+	/** isSendable 과 같은 조건으로 발송 가능한 고객 ID만 */
+	List<Long> filterSendable(@Param("customerIds") List<Long> customerIds, @Param("channel") Channel channel);
+
 	/** 휴면 조건에 맞는 고객을 휴면으로. 바뀐 건수 */
 	int markDormant();
 

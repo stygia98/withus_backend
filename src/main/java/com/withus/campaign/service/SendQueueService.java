@@ -67,6 +67,11 @@ public class SendQueueService {
 		};
 	}
 
+	/** SES 반송 웹훅용 — 해당 건을 BOUNCED 로 기록한다 (팀원1, send_log 는 campaign 도메인 소유라 이 서비스를 통해 쓴다) */
+	public void markBounced(String providerMessageId) {
+		sendLogMapper.markBounced(providerMessageId);
+	}
+
 	/** 워크플로우 SEND 노드 적재. 같은 (instanceId, stepId) 로 다시 호출해도 멱등하다 */
 	public int enqueueWorkflowStep(long campaignId, long instanceId, long stepId, long customerId, Channel channel) {
 		List<SendLog> logs = buildLogs(campaignId, instanceId, stepId, List.of(customerId), channel,

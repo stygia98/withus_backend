@@ -2,7 +2,6 @@ package com.withus.customer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -39,6 +38,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.withus.auth.domain.Role;
 import com.withus.auth.security.AuthMember;
+import com.withus.common.TestCsrf;
 import com.withus.customer.service.CustomerUploadFile;
 
 /** 고객 업로드 (PRD F-01·9장·10.3, API_SPEC 3장). 로컬 Docker DB, 테스트마다 롤백 */
@@ -238,7 +238,7 @@ class CustomerUploadApiTest {
 
 	private ResultActions upload(String filename, byte[] bytes, Role role) throws Exception {
 		return mvc.perform(multipart("/api/v1/customers/uploads").file(new MockMultipartFile("file", filename,
-			"application/octet-stream", bytes)).with(auth(role)).with(csrf()));
+			"application/octet-stream", bytes)).with(auth(role)).with(TestCsrf.issue(mvc)));
 	}
 
 	private RequestPostProcessor auth(Role role) {
