@@ -107,7 +107,7 @@ class SesWebhookTest {
 			"complaint":{"complainedRecipients":[{"emailAddress":"%s"}]}
 			""".formatted(messageId, email), "2"));
 
-		// BOUNCED 로 바꾸면 이미 집계된 오픈·클릭·전환이 사후에 빠진다 (PR #33 리뷰, PL 확인 대기)
+		// BOUNCED 로 바꾸면 이미 집계된 오픈·클릭·전환이 사후에 빠진다 (PRD 8.2)
 		assertThat(sendStatus(messageId)).isEqualTo("SENT");
 		assertThat(consent(id)).isEqualTo("N");
 		assertThat(reason(email)).isEqualTo("COMPLAINT");

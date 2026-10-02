@@ -117,7 +117,7 @@ public class SesWebhookService {
 				suppressionService.suppress(Channel.EMAIL, email, reason);
 			}
 		}
-		// 스팸신고는 send_log 를 SENT 로 둔다: BOUNCED 로 바꾸면 이미 집계된 오픈·클릭·전환이 사후에 빠진다 (PR #33 리뷰, PL 확인 대기)
+		// 스팸신고는 send_log 를 SENT 로 둔다: BOUNCED 로 바꾸면 이미 집계된 오픈·클릭·전환이 사후에 빠진다 (PRD 8.2)
 		if ("BOUNCE".equals(reason)) {
 			markBounced(text(ses.path("mail"), "messageId"));
 		}
