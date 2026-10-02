@@ -87,7 +87,12 @@ public class SendDispatcher {
 				return;
 			}
 			for (SendLog sendLog : claimed) {
-				processOne(sendLog);
+				try {
+					processOne(sendLog);
+				} catch (Exception e) {
+					// 템플릿 누락 등 MessageSender.send 이전 예외 — 이 건만 재시도로 돌리고 배치는 계속 진행한다(PR #21 리뷰)
+					retryOrFail(sendLog, e.getMessage());
+				}
 				processed++;
 			}
 		}
@@ -101,7 +106,10 @@ public class SendDispatcher {
 			return; // recheck 안에서 SKIPPED·PENDING 복귀·시간창 보류를 이미 기록했다
 		}
 		tokenBucket.acquire();
-		Optional<OutboundMessage> message = messageComposer.compose(sendLog, template, unsubscribeUrl(sendLog));
+		String unsubscribeToken = unsubscribeToken(sendLog);
+		Optional<OutboundMessage> message = messageComposer.compose(sendLog, template,
+			trackingBaseUrl + "/unsubscribe/" + unsubscribeToken,
+			trackingBaseUrl + "/api/v1/unsubscribe/one-click/" + unsubscribeToken);
 		if (message.isEmpty()) {
 			return; // 쿠폰 유효기간 밖 — compose 안에서 이미 SKIPPED(COUPON_INVALID) 기록
 		}
@@ -109,22 +117,22 @@ public class SendDispatcher {
 		if (result.success()) {
 			sendLogMapper.recordSent(sendLog.getSendLogId(), result.providerMessageId());
 		} else if (result.errorType() == ErrorType.TRANSIENT) {
-			retryOrFail(sendLog, result);
+			retryOrFail(sendLog, result.errorMessage());
 		} else {
 			sendLogMapper.recordFailed(sendLog.getSendLogId(), result.errorMessage());
 		}
 	}
 
-	/** 일시 오류(TRANSIENT): 1·5·15분 뒤 재시도, 3회 넘으면 FAILED(발송 큐 Plan 8장) */
-	private void retryOrFail(SendLog sendLog, SendResult result) {
+	/** 일시 오류(TRANSIENT) 또는 MessageSender.send 이전 예외: 1·5·15분 뒤 재시도, 3회 넘으면 FAILED(발송 큐 Plan 8장) */
+	private void retryOrFail(SendLog sendLog, String errorMessage) {
 		int nextAttemptCount = sendLog.getAttemptCount() + 1;
 		if (nextAttemptCount > RETRY_INTERVALS.length) {
-			sendLogMapper.recordFailed(sendLog.getSendLogId(), result.errorMessage());
+			sendLogMapper.recordFailed(sendLog.getSendLogId(), errorMessage);
 			return;
 		}
 		OffsetDateTime nextAttemptAt = OffsetDateTime.now(ZoneId.of("Asia/Seoul"))
 			.plus(RETRY_INTERVALS[nextAttemptCount - 1]);
-		sendLogMapper.recordRetry(sendLog.getSendLogId(), nextAttemptAt, result.errorMessage());
+		sendLogMapper.recordRetry(sendLog.getSendLogId(), nextAttemptAt, errorMessage);
 	}
 
 	/**
@@ -171,14 +179,13 @@ public class SendDispatcher {
 
 	/**
 	 * PL 공용 HMAC 유틸(발송 큐 Plan 15장 Q1, {@link UnsubscribeTokens})로 서명한 토큰을 쓴다.
-	 * TEST(customer_id NULL)는 실제 고객이 없어 토큰을 발급할 수 없으므로 예시 링크를 쓴다
+	 * TEST(customer_id NULL)는 실제 고객이 없어 토큰을 발급할 수 없으므로 예시 토큰을 쓴다
 	 * (미리보기·테스트발송 작업과 동일한 처리).
 	 */
-	private String unsubscribeUrl(SendLog sendLog) {
+	private String unsubscribeToken(SendLog sendLog) {
 		if (sendLog.getCustomerId() == null) {
-			return trackingBaseUrl + "/unsubscribe/example";
+			return "example";
 		}
-		String token = unsubscribeTokens.issue(sendLog.getSendLogId(), sendLog.getCustomerId());
-		return trackingBaseUrl + "/unsubscribe/" + token;
+		return unsubscribeTokens.issue(sendLog.getSendLogId(), sendLog.getCustomerId());
 	}
 }

@@ -44,11 +44,13 @@ public class MessageComposer {
 	}
 
 	/**
-	 * @param unsubscribeUrl 이미 만들어진 수신거부 URL. 토큰 생성(PRD 8.3 HMAC)은 PL이 common 에 제공할 유틸의
-	 *                        몫이라 여기서 만들지 않고 호출하는 쪽에서 받는다(Plan 15장 Q1, 아직 미착수)
+	 * @param unsubscribeUrl         본문 링크 — 확인 화면 /unsubscribe/{token}
+	 * @param unsubscribeOneClickUrl List-Unsubscribe 헤더 전용 — 메일 앱이 바로 POST 하는
+	 *                                /api/v1/unsubscribe/one-click/{token}(RFC 8058, Plan 15장 B3)
 	 * @return 렌더링된 메시지. 비어 있으면 쿠폰이 유효기간 밖이라 SKIPPED(COUPON_INVALID)로 이미 기록했다는 뜻
 	 */
-	public Optional<OutboundMessage> compose(SendLog sendLog, Template template, String unsubscribeUrl) {
+	public Optional<OutboundMessage> compose(SendLog sendLog, Template template, String unsubscribeUrl,
+			String unsubscribeOneClickUrl) {
 		Long couponId = sendLog.getStepId() != null
 			? sendLogMapper.findCouponIdByStepId(sendLog.getStepId())
 			: sendLogMapper.findCouponIdByCampaignId(sendLog.getCampaignId());
@@ -73,7 +75,7 @@ public class MessageComposer {
 			String withAd = adCopyInserter.insertEmailBody(rendered, isAd, unsubscribeUrl);
 			String body = trackingLinkService.rewrite(withAd, sendLog.getSendLogId());
 			Map<String, String> headers = Map.of(
-				"List-Unsubscribe", "<" + unsubscribeUrl + ">",
+				"List-Unsubscribe", "<" + unsubscribeOneClickUrl + ">",
 				"List-Unsubscribe-Post", "List-Unsubscribe=One-Click");
 			return Optional.of(new OutboundMessage(Channel.EMAIL, sendLog.getRecipient(), subject, body, headers));
 		}

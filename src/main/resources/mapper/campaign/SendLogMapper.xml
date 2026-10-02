@@ -66,19 +66,22 @@
 
 	<!-- UPDATE ... RETURNING 은 select 로 선언해야 ResultSet 을 받는다 (MyBatis+PostgreSQL 관용 패턴) -->
 	<select id="claimBatch" resultMap="sendLogResultMap">
-		UPDATE send_log SET status = 'SENDING', updated_at = now()
-		WHERE send_log_id IN (
-			SELECT send_log_id FROM send_log
-			WHERE status = 'PENDING' AND (next_attempt_at IS NULL OR next_attempt_at &lt;= now())
-			  AND NOT EXISTS (
-			      SELECT 1 FROM campaign c
-			      WHERE c.campaign_id = send_log.campaign_id AND c.status = 'PAUSED'
-			  )
-			ORDER BY priority, send_log_id
-			LIMIT 50
-			FOR UPDATE SKIP LOCKED
+		WITH claimed AS (
+			UPDATE send_log SET status = 'SENDING', updated_at = now()
+			WHERE send_log_id IN (
+				SELECT send_log_id FROM send_log
+				WHERE status = 'PENDING' AND (next_attempt_at IS NULL OR next_attempt_at &lt;= now())
+				  AND NOT EXISTS (
+				      SELECT 1 FROM campaign c
+				      WHERE c.campaign_id = send_log.campaign_id AND c.status = 'PAUSED'
+				  )
+				ORDER BY priority, send_log_id
+				LIMIT 50
+				FOR UPDATE SKIP LOCKED
+			)
+			RETURNING *
 		)
-		RETURNING *
+		SELECT * FROM claimed ORDER BY priority, send_log_id
 	</select>
 
 	<update id="recordSent">

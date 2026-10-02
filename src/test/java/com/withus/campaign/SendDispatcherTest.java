@@ -215,6 +215,35 @@ class SendDispatcherTest {
 	}
 
 	@Test
+	void 한_건의_템플릿_조회_실패가_배치_전체를_멈추지_않는다() {
+		long brokenCustomer = newCustomer();
+		long goodCustomer = newCustomer();
+		SendLog broken = SendLog.builder()
+			.campaignId(campaignId)
+			.customerId(brokenCustomer)
+			.stepId(999_999_999L) // 존재하지 않는 스텝 — 템플릿을 못 찾아 compose() 에서 NPE 가 난다
+			.recipient("customer-" + brokenCustomer + "@withus.local")
+			.channel(Channel.EMAIL)
+			.status(SendStatus.PENDING)
+			.kind(SendKind.CAMPAIGN)
+			.priority(SendLog.PRIORITY_WORKFLOW_OR_NOTICE)
+			.build();
+		sendLogMapper.insertWorkflowBatch(List.of(broken));
+		enqueue(goodCustomer, SendLog.PRIORITY_CAMPAIGN_BULK);
+
+		sendDispatcher.dispatch();
+
+		String brokenStatus = jdbcTemplate.queryForObject(
+			"SELECT status FROM send_log WHERE campaign_id = ? AND customer_id = ?", String.class, campaignId,
+			brokenCustomer);
+		assertThat(brokenStatus).as("NPE 는 retryOrFail 로 돌아가 1분 뒤 재시도할 PENDING 이 된다").isEqualTo("PENDING");
+		String goodStatus = jdbcTemplate.queryForObject(
+			"SELECT status FROM send_log WHERE campaign_id = ? AND customer_id = ?", String.class, campaignId,
+			goodCustomer);
+		assertThat(goodStatus).as("앞 건이 예외를 던져도 다음 건은 정상 발송돼야 한다").isEqualTo("SENT");
+	}
+
+	@Test
 	void TEST_발송은_시간창과_무관하게_즉시_나간다() {
 		SendLog testLog = SendLog.builder()
 			.campaignId(campaignId)
