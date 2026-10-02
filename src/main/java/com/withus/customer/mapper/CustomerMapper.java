@@ -74,4 +74,11 @@ public interface CustomerMapper {
 
 	/** 휴면 조건에서 벗어난 고객의 휴면 해제. 바뀐 건수 */
 	int releaseDormant();
+
+	/** F-12: SENT 된 NOTICE 의 가장 최근 sent_at 으로 consent_notified_at 갱신 (멱등). 바뀐 건수 */
+	int syncConsentNotifiedAt();
+
+	/** F-12: 채널 동의(또는 그 채널 직전 안내)로부터 2년이 지난 고객 ID, afterId 다음부터 limit 건 */
+	List<Long> findConsentNoticeTargets(@Param("channel") Channel channel, @Param("afterId") long afterId,
+		@Param("limit") int limit);
 }

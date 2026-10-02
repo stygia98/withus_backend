@@ -136,6 +136,20 @@ class CustomerUploadApiTest {
 	}
 
 	@Test
+	void 하이픈_휴대폰도_수신거부_목록의_숫자_번호와_같게_비교한다_PRD_10_3() throws Exception {
+		String digits = "010" + String.format("%08d", Math.floorMod(UUID.randomUUID().getMostSignificantBits(), 100_000_000L));
+		jdbc.update("INSERT INTO suppression (channel, value, reason) VALUES ('SMS', ?, 'UNSUBSCRIBE')", digits);
+		String hyphen = digits.substring(0, 3) + "-" + digits.substring(3, 7) + "-" + digits.substring(7);
+
+		String csv = HEADER + "\n,%s,%s,,,2026-09-01,,Y,Y".formatted(mail("hyphen"), hyphen);
+		upload("h.csv", csv.getBytes(StandardCharsets.UTF_8), Role.MANAGER)
+			.andExpect(jsonPath("$.data.suppressed").value(1));
+
+		assertThat(row(mail("hyphen"))).containsEntry("phone", digits).containsEntry("sms_consent_yn", "N")
+			.containsEntry("email_consent_yn", "Y");
+	}
+
+	@Test
 	void 엑셀에서_저장한_CP949_CSV() throws Exception {
 		String csv = HEADER + "\r\n홍길동," + mail("cp") + ",01055556666,서울특별시,,2026-09-01,,Y,Y\r\n";
 		upload("고객.csv", csv.getBytes(Charset.forName("MS949")), Role.OWNER)
