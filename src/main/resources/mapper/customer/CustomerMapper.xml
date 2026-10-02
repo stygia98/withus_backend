@@ -131,20 +131,32 @@
 	<select id="isSendable" resultType="boolean">
 		SELECT EXISTS (
 			SELECT 1 FROM customer c
-			WHERE c.customer_id = #{customerId} AND c.deleted_yn = 'N'
-			<choose>
-				<when test="channel == @com.withus.common.domain.Channel@EMAIL">
-					AND c.email_consent_yn = 'Y'
-					AND NOT EXISTS (SELECT 1 FROM suppression s WHERE s.channel = 'EMAIL' AND s.value = c.email)
-				</when>
-				<otherwise>
-					AND c.sms_consent_yn = 'Y'
-					AND c.phone IS NOT NULL
-					AND NOT EXISTS (SELECT 1 FROM suppression s WHERE s.channel = 'SMS' AND s.value = c.phone)
-				</otherwise>
-			</choose>
+			WHERE c.customer_id = #{customerId} <include refid="sendable"/>
 		)
 	</select>
+
+	<select id="filterSendable" resultType="long">
+		SELECT c.customer_id FROM customer c
+		WHERE c.customer_id IN
+		<foreach collection="customerIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+		<include refid="sendable"/>
+	</select>
+
+	<!-- 발송 가능 판정 (PRD 8.2): 삭제 N + 채널 동의 Y + suppression 미포함 (SMS 는 휴대폰 필수) -->
+	<sql id="sendable">
+		AND c.deleted_yn = 'N'
+		<choose>
+			<when test="channel == @com.withus.common.domain.Channel@EMAIL">
+				AND c.email_consent_yn = 'Y'
+				AND NOT EXISTS (SELECT 1 FROM suppression s WHERE s.channel = 'EMAIL' AND s.value = c.email)
+			</when>
+			<otherwise>
+				AND c.sms_consent_yn = 'Y'
+				AND c.phone IS NOT NULL
+				AND NOT EXISTS (SELECT 1 FROM suppression s WHERE s.channel = 'SMS' AND s.value = c.phone)
+			</otherwise>
+		</choose>
+	</sql>
 
 	<!-- 휴면 판정 (PRD F-11): 최근 180일 클릭(봇 제외)·구매가 하나라도 있으면 활동.
 	     클릭은 CAMPAIGN 발송만 센다 (CLAUDE.md 6장 8번: TEST·NOTICE 는 모든 지표에서 제외). 오픈은 보지 않는다 -->

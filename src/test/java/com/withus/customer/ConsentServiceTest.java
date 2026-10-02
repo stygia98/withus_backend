@@ -2,6 +2,7 @@ package com.withus.customer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.List;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
@@ -60,6 +61,27 @@ class ConsentServiceTest {
 		long id = customer("Y", "Y", "N", "Y");
 		assertThat(consentService.isSendable(id, Channel.EMAIL)).isFalse();
 		assertThat(consentService.isSendable(Long.MAX_VALUE, Channel.EMAIL)).isFalse();
+	}
+
+	@Test
+	void 여러_고객_일괄_판정은_건별_판정과_같다() {
+		long ok = customer("Y", "Y", "Y", "N");
+		long rejected = customer("N", "N", "N", "N");
+		long deleted = customer("Y", "Y", "N", "Y");
+		long suppressed = customer("Y", "Y", "N", "N");
+		jdbc.update("INSERT INTO suppression (channel, value, reason) SELECT 'EMAIL', email, 'BOUNCE' FROM customer "
+			+ "WHERE customer_id = ?", suppressed);
+		long noPhone = customer("Y", "Y", "N", "N");
+		jdbc.update("UPDATE customer SET phone = NULL WHERE customer_id = ?", noPhone);
+		List<Long> ids = List.of(ok, rejected, deleted, suppressed, noPhone, Long.MAX_VALUE);
+
+		for (Channel channel : Channel.values()) {
+			assertThat(consentService.filterSendable(ids, channel)).containsExactlyInAnyOrderElementsOf(
+				ids.stream().filter(id -> consentService.isSendable(id, channel)).toList());
+		}
+		assertThat(consentService.filterSendable(ids, Channel.EMAIL)).containsExactlyInAnyOrder(ok, noPhone);
+		assertThat(consentService.filterSendable(ids, Channel.SMS)).containsExactlyInAnyOrder(ok, suppressed);
+		assertThat(consentService.filterSendable(List.of(), Channel.EMAIL)).isEmpty();
 	}
 
 	private long customer(String email, String sms, String dormant, String deleted) {
