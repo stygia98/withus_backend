@@ -130,6 +130,23 @@ class CustomerApiTest {
 	}
 
 	@Test
+	void 하이픈_휴대폰도_수신거부_목록의_숫자_번호와_같게_비교한다_PRD_10_3() throws Exception {
+		String digits = phone();
+		jdbc.update("INSERT INTO suppression (channel, value, reason) VALUES ('SMS', ?, 'UNSUBSCRIBE')", digits);
+		String hyphen = digits.substring(0, 3) + "-" + digits.substring(3, 7) + "-" + digits.substring(7);
+
+		call(post("/api/v1/customers").content("""
+			{"email":"%s","phone":"%s","joinedAt":"2026-09-30","emailConsent":"Y","smsConsent":"Y"}
+			""".formatted(email, hyphen)), Role.MANAGER).andExpect(status().isOk())
+			.andExpect(jsonPath("$.data.smsConsent").value("N"))
+			.andExpect(jsonPath("$.data.emailConsent").value("Y"))
+			.andExpect(jsonPath("$.data.suppressedChannels[0]").value("SMS"));
+
+		assertThat(jdbc.queryForObject("SELECT phone FROM customer WHERE email = ? AND deleted_yn = 'N'", String.class,
+			email)).isEqualTo(digits);
+	}
+
+	@Test
 	void 수정은_누적구매액과_수신동의를_바꾸지_않는다() throws Exception {
 		long id = idOf(create(email).andExpect(status().isOk()));
 		jdbc.update("UPDATE customer SET total_purchase = 50000 WHERE customer_id = ?", id);
@@ -161,6 +178,11 @@ class CustomerApiTest {
 	void STAFF_는_고객_API를_쓸_수_없다() throws Exception {
 		call(post("/api/v1/customers").content(body(email)), Role.STAFF).andExpect(status().isForbidden());
 		call(get("/api/v1/customers/1"), Role.STAFF).andExpect(status().isForbidden());
+	}
+
+	/** 시드 고객 번호와 겹치지 않게 UUID 에서 8자리 */
+	private static String phone() {
+		return "010" + String.format("%08d", Math.floorMod(UUID.randomUUID().getMostSignificantBits(), 100_000_000L));
 	}
 
 	private ResultActions create(String email) throws Exception {
