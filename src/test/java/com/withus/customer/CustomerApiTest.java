@@ -2,7 +2,6 @@ package com.withus.customer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -34,6 +33,8 @@ import com.withus.auth.domain.Role;
 import com.withus.auth.security.AuthMember;
 import com.withus.customer.domain.CustomerDeletedEvent;
 import com.withus.customer.domain.CustomerRegisteredEvent;
+
+import jakarta.servlet.http.Cookie;
 
 /** 고객 개별 관리 API (PRD F-02, API_SPEC 3장). 로컬 Docker DB 를 쓰고 테스트마다 롤백한다 */
 @SpringBootTest
@@ -176,11 +177,21 @@ class CustomerApiTest {
 	private ResultActions call(MockHttpServletRequestBuilder request, Role role) throws Exception {
 		var auth = new UsernamePasswordAuthenticationToken(new AuthMember(1L, role), null,
 			List.of(new SimpleGrantedAuthority("ROLE_" + role.name())));
-		return mvc.perform(request.contentType(MediaType.APPLICATION_JSON).with(authentication(auth)).with(csrf()));
+		return mvc.perform(request.contentType(MediaType.APPLICATION_JSON).with(authentication(auth)).with(realCsrf()));
 	}
 
 	private static long idOf(ResultActions result) throws Exception {
 		return ((Number) JsonPath.read(result.andReturn().getResponse().getContentAsString(), "$.data.customerId"))
 			.longValue();
+	}
+
+	/** with(csrf()) 는 공유 컨텍스트의 CSRF 저장소를 바꿔 다른 테스트를 깨뜨리므로 실제 /auth/csrf 쿠키·헤더를 쓴다 (#36) */
+	private org.springframework.test.web.servlet.request.RequestPostProcessor realCsrf() throws Exception {
+		Cookie xsrf = mvc.perform(get("/api/v1/auth/csrf")).andReturn().getResponse().getCookie("XSRF-TOKEN");
+		return request -> {
+			request.setCookies(xsrf);
+			request.addHeader("X-XSRF-TOKEN", xsrf.getValue());
+			return request;
+		};
 	}
 }

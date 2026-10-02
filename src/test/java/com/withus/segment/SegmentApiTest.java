@@ -3,7 +3,6 @@ package com.withus.segment;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -36,6 +35,8 @@ import com.withus.auth.security.AuthMember;
 import com.withus.common.exception.BusinessException;
 import com.withus.common.exception.CommonErrorCode;
 import com.withus.segment.service.SegmentService;
+
+import jakarta.servlet.http.Cookie;
 
 /**
  * 세그먼트 규칙 → SQL 결과 (docs/plans/segment-sql.md 7장). 로컬 Docker DB, 테스트마다 롤백
@@ -284,11 +285,21 @@ class SegmentApiTest {
 	}
 
 	private ResultActions call(MockHttpServletRequestBuilder request, Role role) throws Exception {
-		return mvc.perform(request.contentType(MediaType.APPLICATION_JSON).with(auth(role)).with(csrf()));
+		return mvc.perform(request.contentType(MediaType.APPLICATION_JSON).with(auth(role)).with(realCsrf()));
 	}
 
 	private RequestPostProcessor auth(Role role) {
 		return authentication(new UsernamePasswordAuthenticationToken(new AuthMember(memberId, role), null,
 			List.of(new SimpleGrantedAuthority("ROLE_" + role.name()))));
+	}
+
+	/** with(csrf()) 는 공유 컨텍스트의 CSRF 저장소를 바꿔 다른 테스트를 깨뜨리므로 실제 /auth/csrf 쿠키·헤더를 쓴다 (#36) */
+	private org.springframework.test.web.servlet.request.RequestPostProcessor realCsrf() throws Exception {
+		Cookie xsrf = mvc.perform(get("/api/v1/auth/csrf")).andReturn().getResponse().getCookie("XSRF-TOKEN");
+		return request -> {
+			request.setCookies(xsrf);
+			request.addHeader("X-XSRF-TOKEN", xsrf.getValue());
+			return request;
+		};
 	}
 }

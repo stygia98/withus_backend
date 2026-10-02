@@ -65,4 +65,12 @@
 			SELECT 1 FROM track_link WHERE template_id = #{templateId}
 		)
 	</select>
+
+	<select id="findTemplateIdByCampaignId" resultType="long">
+		SELECT template_id FROM campaign WHERE campaign_id = #{campaignId}
+	</select>
+
+	<select id="findTemplateIdByStepId" resultType="long">
+		SELECT (config_json ->> 'templateId')::bigint FROM workflow_step WHERE step_id = #{stepId}
+	</select>
 </mapper>
