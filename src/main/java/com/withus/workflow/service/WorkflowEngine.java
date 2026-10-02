@@ -8,10 +8,12 @@ import java.util.Map;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.withus.campaign.domain.CustomerPlaceholderSource;
 import com.withus.campaign.domain.SendStatus;
 import com.withus.campaign.mapper.SendLogMapper;
 import com.withus.campaign.service.SendQueueService;
 import com.withus.common.domain.Channel;
+import com.withus.tracking.service.TrackEventRepository;
 import com.withus.workflow.domain.NodeType;
 import com.withus.workflow.domain.WorkflowInstance;
 import com.withus.workflow.domain.WorkflowStep;
@@ -21,8 +23,8 @@ import com.withus.workflow.mapper.WorkflowStepMapper;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * 워크플로우 노드 실행기 (workflow-plan.md 2.2·3장, 엔진 2/4). 선점된 인스턴스 1건을 WAIT·END를
- * 만날 때까지 한 트랜잭션(tx2) 안에서 연속 실행한다. CONDITION은 엔진 3/4에서 이 switch에 더한다.
+ * 워크플로우 노드 실행기 (workflow-plan.md 2.2·3장, 엔진 2/4·3/4). 선점된 인스턴스 1건을 WAIT·END를
+ * 만날 때까지 한 트랜잭션(tx2) 안에서 연속 실행한다.
  */
 @Service
 public class WorkflowEngine {
@@ -31,14 +33,17 @@ public class WorkflowEngine {
 	private final WorkflowInstanceMapper workflowInstanceMapper;
 	private final SendQueueService sendQueueService;
 	private final SendLogMapper sendLogMapper;
+	private final TrackEventRepository trackEventRepository;
 	private final ObjectMapper objectMapper;
 
 	public WorkflowEngine(WorkflowStepMapper workflowStepMapper, WorkflowInstanceMapper workflowInstanceMapper,
-			SendQueueService sendQueueService, SendLogMapper sendLogMapper, ObjectMapper objectMapper) {
+			SendQueueService sendQueueService, SendLogMapper sendLogMapper,
+			TrackEventRepository trackEventRepository, ObjectMapper objectMapper) {
 		this.workflowStepMapper = workflowStepMapper;
 		this.workflowInstanceMapper = workflowInstanceMapper;
 		this.sendQueueService = sendQueueService;
 		this.sendLogMapper = sendLogMapper;
+		this.trackEventRepository = trackEventRepository;
 		this.objectMapper = objectMapper;
 	}
 
@@ -67,7 +72,8 @@ public class WorkflowEngine {
 					workflowInstanceMapper.complete(instance.getInstanceId());
 					return;
 				}
-				case CONDITION -> throw new UnsupportedOperationException("CONDITION 노드 실행은 엔진 3/4에서 구현한다");
+				case CONDITION -> currentStepId = evaluateCondition(instance, step) ? step.getYesStepId()
+					: step.getNoStepId();
 				case TRIGGER -> throw new IllegalStateException(
 					"TRIGGER 는 인스턴스 생성 시 건너뛰므로 실행 중에는 도달할 수 없다");
 			}
@@ -96,9 +102,8 @@ public class WorkflowEngine {
 		}
 	}
 
-	@SuppressWarnings("unchecked")
 	private Duration waitDuration(WorkflowStep step) {
-		Map<String, Object> config = objectMapper.readValue(step.getConfigJson(), Map.class);
+		Map<String, Object> config = parseConfig(step);
 		long amount = ((Number) config.get("amount")).longValue();
 		String unit = (String) config.get("unit");
 		return switch (unit) {
@@ -107,5 +112,38 @@ public class WorkflowEngine {
 			case "DAY" -> Duration.ofDays(amount);
 			default -> throw new IllegalStateException("알 수 없는 WAIT 단위: " + unit);
 		};
+	}
+
+	/**
+	 * workflow-plan.md 3.2 — EMAIL_OPENED/CLICKED 는 이 인스턴스의 직전 메일(채널 지정, PL 리뷰 R3)에
+	 * 봇이 아닌 이벤트가 있는지, PURCHASE_GTE 는 누적구매액을 비교한다. SKIPPED·FAILED 로 끝난 메일은
+	 * track_event 가 없으므로 existsHumanEvent 가 자연히 false 를 돌려준다(별도 분기 불필요).
+	 */
+	private boolean evaluateCondition(WorkflowInstance instance, WorkflowStep step) {
+		Map<String, Object> config = parseConfig(step);
+		String condition = (String) config.get("condition");
+		return switch (condition) {
+			case "EMAIL_OPENED" -> evaluateEmailEvent(instance, "OPEN");
+			case "EMAIL_CLICKED" -> evaluateEmailEvent(instance, "CLICK");
+			case "PURCHASE_GTE" -> evaluatePurchase(instance, config);
+			default -> throw new IllegalStateException("알 수 없는 조건: " + condition);
+		};
+	}
+
+	private boolean evaluateEmailEvent(WorkflowInstance instance, String eventType) {
+		Long sendLogId = sendLogMapper.findLatestSendLogId(instance.getInstanceId(), Channel.EMAIL);
+		return sendLogId != null && trackEventRepository.existsHumanEvent(sendLogId, eventType);
+	}
+
+	private boolean evaluatePurchase(WorkflowInstance instance, Map<String, Object> config) {
+		long amount = ((Number) config.get("amount")).longValue();
+		CustomerPlaceholderSource source = sendLogMapper.findPlaceholderSource(instance.getCustomerId());
+		Long totalPurchase = source.getTotalPurchase();
+		return totalPurchase != null && totalPurchase >= amount;
+	}
+
+	@SuppressWarnings("unchecked")
+	private Map<String, Object> parseConfig(WorkflowStep step) {
+		return objectMapper.readValue(step.getConfigJson(), Map.class);
 	}
 }

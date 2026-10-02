@@ -92,4 +92,11 @@ public interface SendLogMapper {
 	 * 상태(PENDING/SKIPPED)를 읽어온다. 해당 채널에 수신처가 없어 아예 적재되지 않았으면 null.
 	 */
 	SendStatus findStatusByInstanceStep(@Param("instanceId") long instanceId, @Param("stepId") long stepId);
+
+	/**
+	 * 워크플로우 CONDITION(EMAIL_OPENED/CLICKED)용 — 이 인스턴스의 가장 최근 EMAIL 발송 건
+	 * (PRD 6.3 "직전 메일", workflow-plan.md 3.2 PL 리뷰 R3: 채널을 지정해야 SMS 가 섞인 구조에서
+	 * 엉뚱한 건을 집지 않는다). 아직 메일을 보낸 적이 없으면 null
+	 */
+	Long findLatestSendLogId(@Param("instanceId") long instanceId, @Param("channel") Channel channel);
 }
