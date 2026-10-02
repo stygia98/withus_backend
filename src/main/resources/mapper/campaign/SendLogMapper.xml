@@ -149,4 +149,8 @@
 	<select id="countPending" resultType="long">
 		SELECT count(*) FROM send_log WHERE status = 'PENDING'
 	</select>
+
+	<select id="findStatusByInstanceStep" resultType="com.withus.campaign.domain.SendStatus">
+		SELECT status FROM send_log WHERE instance_id = #{instanceId} AND step_id = #{stepId}
+	</select>
 </mapper>

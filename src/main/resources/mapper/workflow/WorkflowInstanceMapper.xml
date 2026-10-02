@@ -18,4 +18,20 @@
 		)
 		RETURNING *
 	</select>
+
+	<update id="moveToWaitPending">
+		UPDATE workflow_instance SET status = 'WAITING', current_step_id = #{nextStepId}, next_run_at = NULL,
+			updated_at = now()
+		WHERE instance_id = #{instanceId}
+	</update>
+
+	<update id="moveToWait">
+		UPDATE workflow_instance SET status = 'WAITING', current_step_id = #{nextStepId}, next_run_at = #{nextRunAt},
+			updated_at = now()
+		WHERE instance_id = #{instanceId}
+	</update>
+
+	<update id="complete">
+		UPDATE workflow_instance SET status = 'COMPLETED', updated_at = now() WHERE instance_id = #{instanceId}
+	</update>
 </mapper>

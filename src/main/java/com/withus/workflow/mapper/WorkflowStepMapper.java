@@ -13,6 +13,9 @@ public interface WorkflowStepMapper {
 	/** 캠페인의 전체 구조 조회 (step_id 순) */
 	List<WorkflowStep> findByCampaignId(@Param("campaignId") long campaignId);
 
+	/** 엔진의 노드 실행기(current_step_id로 다음 노드를 찾는다)용 단건 조회 */
+	WorkflowStep findById(@Param("stepId") long stepId);
+
 	/**
 	 * 일괄 insert. next_step_id·yes_step_id·no_step_id 는 아직 모르므로(같은 호출 안에서 뒤에 나오는
 	 * 노드를 가리킬 수 있다) 여기서 넣지 않는다 — insert 후 각 step 객체에 채워진 stepId로 updateLinks 를 부른다.

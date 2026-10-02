@@ -9,6 +9,7 @@ import org.apache.ibatis.annotations.Param;
 import com.withus.campaign.domain.CustomerPlaceholderSource;
 import com.withus.campaign.domain.CustomerRecipient;
 import com.withus.campaign.domain.SendLog;
+import com.withus.campaign.domain.SendStatus;
 import com.withus.common.domain.Channel;
 
 @Mapper
@@ -85,4 +86,10 @@ public interface SendLogMapper {
 
 	/** 전체 PENDING 대기 건수 — 새 캠페인 시작 전 예상 소요 시간 계산용(캠페인 3/4 estimate) */
 	long countPending();
+
+	/**
+	 * 워크플로우 엔진의 WAIT 처리용(workflow-plan.md 3장) — 방금 enqueueWorkflowStep 으로 적재한 건의
+	 * 상태(PENDING/SKIPPED)를 읽어온다. 해당 채널에 수신처가 없어 아예 적재되지 않았으면 null.
+	 */
+	SendStatus findStatusByInstanceStep(@Param("instanceId") long instanceId, @Param("stepId") long stepId);
 }
