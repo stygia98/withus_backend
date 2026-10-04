@@ -138,6 +138,14 @@ class TemplateControllerTest {
 	}
 
 	@Test
+	void 광고성_템플릿에_광고_표기를_직접_쓰면_400이고_위치를_알려준다() throws Exception {
+		createEmail("광고", "(광고) 가을 선물", "본문")
+			.andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.error.code").value("TEMPLATE_AD_COPY_NOT_ALLOWED"))
+			.andExpect(jsonPath("$.error.details.field").value("subject"));
+	}
+
+	@Test
 	void 사용_중인_템플릿은_수정과_삭제가_409() throws Exception {
 		long templateId = extractTemplateId(createEmail("캠페인용", "제목", "본문")
 			.andReturn().getResponse().getContentAsString());
