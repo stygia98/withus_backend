@@ -78,6 +78,20 @@ class CopyDraftServiceTest {
 	}
 
 	@Test
+	void 본문의_광고_머리말과_수신거부_안내_줄을_지워_광고성_템플릿으로_저장할_수_있게_한다() {
+		CopyDraftResponse result = serviceReturning(drafts(
+			"제목1", "(광고) 안녕하세요\\n\\n가을 혜택을 드려요\\n무료 수신거부 080-123-4567",
+			"제목2", "첫 문단\\n\\n수신을 원치 않으시면 0801234567 로 연락 주세요\\n\\n끝 문단",
+			"제목3", "수신거부는 아래 링크에서 하실 수 있어요 02-123-4567"), false).generate(INPUT);
+
+		assertThat(result.drafts()).extracting(CopyDraftResponse.Draft::body).containsExactly(
+			"안녕하세요\n\n가을 혜택을 드려요",
+			"첫 문단\n\n끝 문단",
+			// '수신거부' 단어와 일반 전화번호는 템플릿 검증도 허용한다 (오탐 방지)
+			"수신거부는 아래 링크에서 하실 수 있어요 02-123-4567");
+	}
+
+	@Test
 	void 빈_안을_빼고_세_안이_안_되면_AI_UNAVAILABLE() {
 		assertThatThrownBy(() -> serviceReturning(drafts("제목1", "본문1", "", "본문2", "제목3", "<b></b>"), false)
 			.generate(INPUT))
