@@ -2,6 +2,7 @@ package com.withus.workflow.service;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
+import java.util.HashMap;
 import java.util.Map;
 
 import org.slf4j.Logger;
@@ -61,21 +62,31 @@ public class WorkflowEngine {
 		this.transactionTemplate = new TransactionTemplate(transactionManager);
 	}
 
-	/** tx2 가 실패하면 여기서 잡아 tx3(retryOrFail)으로 기록한다 — 호출하는 쪽에는 예외를 던지지 않는다 */
+	/** 단계 캐시 없이 한 건 실행한다(테스트·단건 호출용) */
 	public void processOne(WorkflowInstance instance) {
+		processOne(instance, new HashMap<>());
+	}
+
+	/**
+	 * tx2 가 실패하면 여기서 잡아 tx3(retryOrFail)으로 기록한다 — 호출하는 쪽에는 예외를 던지지 않는다.
+	 * @param stepCache 같은 묶음 안에서 stepId 로 단계를 재사용한다(인스턴스마다 같은 캠페인 단계를 다시 읽지 않도록).
+	 *                  호출자가 묶음마다 새로 만들어 넘기고 스레드 간에 공유하지 않는다 — 구조는 DRAFT 에서만 바뀌고
+	 *                  실행 대상은 ACTIVE 캠페인뿐이라 묶음 단위면 무효화 문제가 없다
+	 */
+	public void processOne(WorkflowInstance instance, Map<Long, WorkflowStep> stepCache) {
 		try {
-			transactionTemplate.executeWithoutResult(status -> runNodes(instance));
+			transactionTemplate.executeWithoutResult(status -> runNodes(instance, stepCache));
 		} catch (Exception e) {
 			log.warn("워크플로우 인스턴스 실행 실패 instanceId={}", instance.getInstanceId(), e);
 			retryOrFail(instance, e);
 		}
 	}
 
-	private void runNodes(WorkflowInstance instance) {
+	private void runNodes(WorkflowInstance instance, Map<Long, WorkflowStep> stepCache) {
 		long currentStepId = instance.getCurrentStepId();
 		SendStatus lastSendStatus = null;
 		while (true) {
-			WorkflowStep step = workflowStepMapper.findById(currentStepId);
+			WorkflowStep step = stepCache.computeIfAbsent(currentStepId, workflowStepMapper::findById);
 			switch (step.getNodeType()) {
 				case SEND_EMAIL, SEND_SMS -> {
 					lastSendStatus = executeSend(instance, step);
