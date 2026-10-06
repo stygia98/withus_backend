@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -23,7 +24,7 @@ import tools.jackson.databind.ObjectMapper;
 /**
  * AI-01 메일 문구 초안 3안 (PRD 5.3). DB 를 쓰지 않으므로 트랜잭션 없이 LLM 만 부른다.
  *
- * <p>LLM 응답은 그대로 믿지 않고 정리한다: 허용하지 않은 치환자·HTML 태그·(광고) 머리말을 지운다.
+ * <p>LLM 응답은 그대로 믿지 않고 정리한다: 허용하지 않은 치환자·HTML 태그·(광고) 머리말·수신거부 안내 줄을 지운다.
  * (광고)·수신거부 문구는 발송 시 시스템이 자동으로 넣기 때문에(PRD 8.4) 초안에 있으면 두 번 나간다.
  */
 @Service
@@ -37,6 +38,11 @@ public class CopyDraftService {
 	private static final Pattern PLACEHOLDER = Pattern.compile("\\{\\{\\s*([A-Za-z0-9_]+)(?:\\|[^}]*)?\\s*}}");
 	private static final Pattern HTML_TAG = Pattern.compile("<[^>]{1,200}>");
 	private static final Pattern AD_PREFIX = Pattern.compile("^\\s*[(\\[]\\s*광고\\s*[)\\]]\\s*");
+	/**
+	 * 시스템이 넣는 수신거부 안내 문구와 080 번호. 광고성 템플릿 저장 검증(TemplateService, TEMPLATE_AD_COPY_NOT_ALLOWED)과
+	 * 같은 패턴이어야 초안을 그대로 저장할 수 있다
+	 */
+	private static final Pattern UNSUBSCRIBE_COPY = Pattern.compile("무료\\s*수신\\s*거부|080[-\\s]?\\d{3,4}[-\\s]?\\d{4}");
 
 	private static final String SYSTEM_INSTRUCTION = """
 		당신은 한국어 CRM 마케팅 메일 카피라이터다. 입력을 바탕으로 서로 다른 접근의 메일 문구 3안을 만든다.
@@ -122,6 +128,10 @@ public class CopyDraftService {
 			return "";
 		}
 		String text = keepAllowedPlaceholders(stripTags(body)).replace("\r\n", "\n");
+		text = AD_PREFIX.matcher(text).replaceFirst("");
+		// 프롬프트로 막아도 LLM 이 수신거부 안내를 쓰면 템플릿 저장이 거절되므로 그 줄을 뺀다
+		text = text.lines().filter(line -> !UNSUBSCRIBE_COPY.matcher(line).find())
+			.collect(Collectors.joining("\n"));
 		// 3줄 이상 빈 줄은 문단 구분(빈 줄 1개)으로 줄인다
 		return text.replaceAll("[ \\t]+\\n", "\n").replaceAll("\\n{3,}", "\n\n").strip();
 	}
