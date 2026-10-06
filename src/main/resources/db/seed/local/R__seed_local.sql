@@ -66,9 +66,10 @@ FROM (VALUES
 JOIN member m ON m.email = 'seed@withus.local'
 WHERE NOT EXISTS (SELECT 1 FROM template t WHERE t.name = v.name);
 
--- 쿠폰 2개 (정액·정률). 유효기간은 처음 시드가 들어간 날부터 60일
+-- 쿠폰 2개 (정액·정률). 유효기간은 처음 시드가 들어간 날의 30일 전부터 60일 뒤까지
+-- (시연 데이터 R__seed_local_demo.sql 의 과거 발급·사용일이 유효기간 안에 들어오게, project #12)
 INSERT INTO coupon (name, discount_type, discount_value, max_discount_amount, valid_from, valid_to)
-SELECT v.name, v.discount_type, v.discount_value, v.max_discount_amount, CURRENT_DATE, CURRENT_DATE + 60
+SELECT v.name, v.discount_type, v.discount_value, v.max_discount_amount, CURRENT_DATE - 30, CURRENT_DATE + 60
 FROM (VALUES
         ('5,000원 할인', 'AMOUNT', 5000, NULL::int),
         ('10% 할인 (최대 1만 원)', 'RATE', 10, 10000)
