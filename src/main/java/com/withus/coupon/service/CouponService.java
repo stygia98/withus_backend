@@ -14,6 +14,8 @@ public interface CouponService {
 	 * <p><b>멱등:</b> 같은 sendLogId 로 다시 호출하면 새로 발급하지 않고 기존 발급의 토큰을 그대로 돌려준다.
 	 * 발송 큐가 일시 오류로 건을 PENDING 으로 되돌려 렌더링부터 다시 하기 때문이다 (PRD 8.2).
 	 * 발송 1건당 발급 1건이라는 규칙은 coupon_issue.send_log_id UNIQUE 로도 보장된다.
+	 * 다른 couponId·customerId 로 다시 호출하는 경로는 정상 흐름에 없으며, 이때도 처음 발급분의 토큰을 돌려준다
+	 * (인자를 무시, project #12 PL 결정).
 	 *
 	 * <p>구현 시 주의: 먼저 조회하고 없을 때만 넣는 방식은 동시 호출에서 제약 위반이 나므로,
 	 * INSERT ... ON CONFLICT (send_log_id) DO NOTHING 후 send_log_id 로 다시 조회한다.
