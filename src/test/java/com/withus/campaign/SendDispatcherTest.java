@@ -24,6 +24,7 @@ import com.withus.campaign.mapper.SendLogMapper;
 import com.withus.campaign.mapper.TemplateMapper;
 import com.withus.campaign.service.MessageComposer;
 import com.withus.campaign.service.SendDispatcher;
+import com.withus.campaign.service.SendQueueService;
 import com.withus.campaign.service.messaging.MessageSenderRouter;
 import com.withus.common.domain.Channel;
 import com.withus.common.token.UnsubscribeTokens;
@@ -53,6 +54,8 @@ class SendDispatcherTest {
 	ConsentService consentService;
 	@Autowired
 	MessageComposer messageComposer;
+	@Autowired
+	SendQueueService sendQueueService;
 	@Autowired
 	UnsubscribeTokens unsubscribeTokens;
 	@Autowired
@@ -93,6 +96,7 @@ class SendDispatcherTest {
 	@AfterEach
 	void cleanUp() {
 		jdbcTemplate.update("DELETE FROM send_log WHERE campaign_id = ?", campaignId);
+		jdbcTemplate.update("DELETE FROM send_log WHERE template_id = ?", templateId);
 		jdbcTemplate.update("DELETE FROM campaign WHERE campaign_id = ?", campaignId);
 		jdbcTemplate.update("DELETE FROM segment WHERE segment_id = ?", segmentId);
 		jdbcTemplate.update("DELETE FROM template WHERE template_id = ?", templateId);
@@ -253,22 +257,18 @@ class SendDispatcherTest {
 	}
 
 	@Test
-	void TEST_발송은_시간창과_무관하게_즉시_나간다() {
-		SendLog testLog = SendLog.builder()
-			.campaignId(campaignId)
-			.recipient("tester@withus.local")
-			.channel(Channel.EMAIL)
-			.status(SendStatus.PENDING)
-			.kind(SendKind.TEST)
-			.priority(SendLog.PRIORITY_TEST)
-			.build();
-		sendLogMapper.insertOneTimeBatch(List.of(testLog));
+	void TEST_발송은_시간창과_무관하게_캠페인_없이_템플릿만으로_즉시_나간다() {
+		// 광고성 템플릿 — TEST 가 아니면 08:00~20:50 밖에서 보류된다. 캠페인 없이 template_id 만으로 렌더링한다
+		jdbcTemplate.update("UPDATE template SET ad_yn = 'Y' WHERE template_id = ?", templateId);
+		sendQueueService.enqueueTest(templateId, Channel.EMAIL, "tester@withus.local");
 
 		sendDispatcher.dispatch();
 
-		String status = jdbcTemplate.queryForObject(
-			"SELECT status FROM send_log WHERE campaign_id = ? AND kind = 'TEST'", String.class, campaignId);
-		assertThat(status).isEqualTo("SENT");
+		var row = jdbcTemplate.queryForMap(
+			"SELECT status, campaign_id, provider_message_id FROM send_log WHERE template_id = ? AND kind = 'TEST'",
+			templateId);
+		assertThat(row).containsEntry("status", "SENT").containsEntry("campaign_id", null);
+		assertThat(row.get("provider_message_id")).isNotNull();
 	}
 
 	private OffsetDateTime sentAtOf(long customerId) {

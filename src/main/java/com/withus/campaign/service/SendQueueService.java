@@ -60,6 +60,14 @@ public class SendQueueService {
 		return totalInserted;
 	}
 
+	/**
+	 * 템플릿 테스트 발송 1건 적재(kind=TEST, priority 1). 고객이 없으므로 수신동의 확인 대상이 아니다.
+	 * recipient 는 호출자가 정규화해서 넘긴다
+	 */
+	public void enqueueTest(long templateId, Channel channel, String recipient) {
+		sendLogMapper.insertTest(templateId, recipient, channel, priorityOf(SendKind.TEST));
+	}
+
 	private static short priorityOf(SendKind kind) {
 		return switch (kind) {
 			case TEST -> SendLog.PRIORITY_TEST;

@@ -29,8 +29,8 @@ public class TemplatePreviewService {
 	private static final int SMS_BYTE_LIMIT = 90;
 	// 기본값 문법 {{name|고객}} 이 하나도 없으면 고객별 조회 없이 기본값 인원이 0 이다
 	private static final Pattern HAS_DEFAULT = Pattern.compile("\\{\\{[^}]*\\|");
-	// STAFF 용 고정 샘플 — 실제 고객 값이 아니다
-	private static final CustomerPlaceholderSource FIXED_SAMPLE =
+	// STAFF 용 고정 샘플 — 실제 고객 값이 아니다. 테스트 발송(MessageComposer)도 같은 값을 쓴다
+	static final CustomerPlaceholderSource FIXED_SAMPLE =
 		new CustomerPlaceholderSource("홍길동", "sample@example.com", "SEOUL", 100000L);
 
 	private final TemplateService templateService;
