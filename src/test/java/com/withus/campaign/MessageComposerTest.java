@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 
 import com.withus.campaign.domain.CustomerPlaceholderSource;
+import com.withus.campaign.domain.SendKind;
 import com.withus.campaign.domain.SendLog;
 import com.withus.campaign.domain.Template;
 import com.withus.campaign.mapper.SendLogMapper;
@@ -108,6 +109,28 @@ class MessageComposerTest {
 		order.verify(couponService).issue(5L, 10L, 100L);
 		order.verify(sendLogMapper).findPlaceholderSource(10L);
 		order.verify(trackingLinkService).rewrite(any(), eq(100L));
+	}
+
+	@Test
+	void TEST_발송은_쿠폰_발급과_추적_치환_없이_고정_샘플_값으로_조립한다() {
+		SendLog testLog = SendLog.builder().sendLogId(200L).kind(SendKind.TEST).channel(Channel.EMAIL)
+			.recipient("me@withus.local").templateId(7L).build();
+
+		Optional<OutboundMessage> result = messageComposer.compose(
+			testLog, template("{{name}}님 안내", "<p>{{name}}님, 쿠폰: {{couponUrl}}</p>", true),
+			"https://withus.local/unsubscribe/example", "https://withus.local/api/v1/unsubscribe/one-click/example");
+
+		assertThat(result).isPresent();
+		OutboundMessage message = result.get();
+		assertThat(message.to()).isEqualTo("me@withus.local");
+		assertThat(message.subject()).isEqualTo("(광고) 홍길동님 안내");
+		assertThat(message.body()).contains("홍길동님").contains("https://withus.local/c/example")
+			.contains("https://withus.local/unsubscribe/example");
+		// 쿠폰 조회·발급, 고객 조회, 추적 치환이 전혀 일어나지 않아야 한다(customer_id NULL 에 issue() 를 부르면 언박싱 NPE)
+		verify(couponService, never()).issue(anyLong(), anyLong(), anyLong());
+		verify(trackingLinkService, never()).rewrite(any(), anyLong());
+		verify(sendLogMapper, never()).findCouponIdByCampaignId(anyLong());
+		verify(sendLogMapper, never()).findPlaceholderSource(anyLong());
 	}
 
 	@Test

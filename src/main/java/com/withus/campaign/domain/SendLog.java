@@ -37,4 +37,6 @@ public class SendLog {
 	private OffsetDateTime sentAt;
 	private OffsetDateTime createdAt;
 	private OffsetDateTime updatedAt;
+	/** TEST 발송만 값이 있다 — 캠페인·단계가 없어 렌더링할 템플릿을 여기서 찾는다 */
+	private Long templateId;
 }

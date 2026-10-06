@@ -27,7 +27,7 @@ class SendLogMapperXmlLoadTest {
 
 		var resultMap = configuration.getResultMap("com.withus.campaign.mapper.SendLogMapper.sendLogResultMap");
 		assertThat(resultMap).isNotNull();
-		assertThat(resultMap.getConstructorResultMappings()).hasSize(19);
+		assertThat(resultMap.getConstructorResultMappings()).hasSize(20);
 		assertThat(configuration.getMappedStatementNames())
 			.contains("com.withus.campaign.mapper.SendLogMapper.claimBatch",
 				"com.withus.campaign.mapper.SendLogMapper.findByProviderMessageId");

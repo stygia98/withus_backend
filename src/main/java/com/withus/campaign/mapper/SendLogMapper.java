@@ -32,6 +32,10 @@ public interface SendLogMapper {
 	 */
 	int insertWorkflowBatch(@Param("logs") List<SendLog> logs);
 
+	/** 템플릿 테스트 발송 1건(kind=TEST, customer_id·campaign_id NULL) */
+	int insertTest(@Param("templateId") long templateId, @Param("recipient") String recipient,
+		@Param("channel") Channel channel, @Param("priority") short priority);
+
 	/**
 	 * 선점: PENDING 중 priority·send_log_id 순으로 최대 50건을 SENDING 으로 바꾸고 그 행을 돌려준다.
 	 * DRAFT·SCHEDULED·PAUSED 캠페인 건은 선점 대상에서 제외한다 — PAUSED 는 발송 큐 Plan 15장 A1(안 하면 계속 선점·반환을 반복해
