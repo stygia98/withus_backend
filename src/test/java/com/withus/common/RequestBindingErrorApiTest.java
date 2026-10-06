@@ -1,6 +1,7 @@
 package com.withus.common;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -13,6 +14,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
@@ -81,6 +83,24 @@ class RequestBindingErrorApiTest {
 	void 본문_JSON_형식이_틀리면_400() throws Exception {
 		mvc.perform(post("/api/v1/ai/copy-drafts").cookie(access, xsrf).header("X-XSRF-TOKEN", xsrf.getValue())
 				.contentType(MediaType.APPLICATION_JSON).content("{\"purpose\": "))
+			.andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.error.code").value("COMMON_INVALID_INPUT"));
+	}
+
+	@Test
+	void 업로드에서_file_파트가_없으면_400이고_메시지에_파트_이름만_넣는다() throws Exception {
+		// 다른 이름의 파트만 보낸다 (프론트에서 필드 이름을 잘못 쓰거나 파일을 고르지 않고 보낸 경우)
+		MockMultipartFile other = new MockMultipartFile("image", "a.png", "image/png", new byte[] { 1 });
+		mvc.perform(multipart("/api/v1/files/images").file(other).cookie(access, xsrf).header("X-XSRF-TOKEN", xsrf.getValue()))
+			.andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.error.code").value("COMMON_INVALID_INPUT"))
+			.andExpect(jsonPath("$.error.message").value("필수 요청 값이 없습니다: file"));
+	}
+
+	@Test
+	void 업로드를_multipart_가_아닌_요청으로_보내면_400() throws Exception {
+		mvc.perform(post("/api/v1/files/images").cookie(access, xsrf).header("X-XSRF-TOKEN", xsrf.getValue())
+				.contentType(MediaType.APPLICATION_JSON).content("{}"))
 			.andExpect(status().isBadRequest())
 			.andExpect(jsonPath("$.error.code").value("COMMON_INVALID_INPUT"));
 	}

@@ -11,10 +11,13 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
+import org.springframework.web.bind.ServletRequestBindingException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.MultipartException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import com.withus.auth.domain.AuthErrorCode;
@@ -51,6 +54,21 @@ public class GlobalExceptionHandler {
 	@ExceptionHandler(MissingServletRequestParameterException.class)
 	public ResponseEntity<ApiResponse<Void>> handleMissingParameter(MissingServletRequestParameterException e) {
 		return toResponse(CommonErrorCode.COMMON_INVALID_INPUT, "필수 요청 값이 없습니다: " + e.getParameterName(), null);
+	}
+
+	/** multipart 요청에 필수 파트(예: 업로드의 file)가 없음: 메시지에는 파트 이름만 넣는다 */
+	@ExceptionHandler(MissingServletRequestPartException.class)
+	public ResponseEntity<ApiResponse<Void>> handleMissingPart(MissingServletRequestPartException e) {
+		return toResponse(CommonErrorCode.COMMON_INVALID_INPUT, "필수 요청 값이 없습니다: " + e.getRequestPartName(), null);
+	}
+
+	/**
+	 * 그 밖의 요청 바인딩 오류(필수 헤더·쿠키 누락 등)와 multipart 가 아닌 요청으로 업로드한 경우.
+	 * 하위 예외인 파라미터 누락·파트 누락·업로드 한도 초과는 각자의 처리기가 잡는다 (Spring 은 예외 계층이 가장 가까운 처리기를 고른다)
+	 */
+	@ExceptionHandler({ ServletRequestBindingException.class, MultipartException.class })
+	public ResponseEntity<ApiResponse<Void>> handleBindingFailure(Exception e) {
+		return toResponse(CommonErrorCode.COMMON_INVALID_INPUT, CommonErrorCode.COMMON_INVALID_INPUT.message(), null);
 	}
 
 	/** multipart 한도 초과는 컨트롤러 전에 나므로 서비스의 크기 검사 대신 여기서 400 으로 바꾼다 (API_SPEC 12장) */
