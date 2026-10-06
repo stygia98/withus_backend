@@ -1,5 +1,6 @@
 package com.withus.common.exception;
 
+import java.io.IOException;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -10,6 +11,7 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingPathVariableException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.ServletRequestBindingException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -63,11 +65,35 @@ public class GlobalExceptionHandler {
 	}
 
 	/**
-	 * 그 밖의 요청 바인딩 오류(필수 헤더·쿠키 누락 등)와 multipart 가 아닌 요청으로 업로드한 경우.
-	 * 하위 예외인 파라미터 누락·파트 누락·업로드 한도 초과는 각자의 처리기가 잡는다 (Spring 은 예외 계층이 가장 가까운 처리기를 고른다)
+	 * 그 밖의 요청 바인딩 오류(필수 헤더·쿠키 누락 등). 하위 예외인 파라미터 누락·경로 변수 누락은 각자의 처리기가 잡는다
+	 * (Spring 은 예외 계층이 가장 가까운 처리기를 고른다)
 	 */
-	@ExceptionHandler({ ServletRequestBindingException.class, MultipartException.class })
-	public ResponseEntity<ApiResponse<Void>> handleBindingFailure(Exception e) {
+	@ExceptionHandler(ServletRequestBindingException.class)
+	public ResponseEntity<ApiResponse<Void>> handleBindingFailure(ServletRequestBindingException e) {
+		return toResponse(CommonErrorCode.COMMON_INVALID_INPUT, CommonErrorCode.COMMON_INVALID_INPUT.message(), null);
+	}
+
+	/**
+	 * 경로 변수 누락은 @PathVariable 이름과 매핑이 어긋난 서버 쪽 오류라 500 이다. 값은 왔는데 변환 결과가 null 인
+	 * 경우만 클라이언트 입력 문제로 400 (Spring 의 MissingPathVariableException.getStatusCode 와 같은 기준)
+	 */
+	@ExceptionHandler(MissingPathVariableException.class)
+	public ResponseEntity<ApiResponse<Void>> handleMissingPathVariable(MissingPathVariableException e) {
+		if (e.isMissingAfterConversion()) {
+			return toResponse(CommonErrorCode.COMMON_INVALID_INPUT, CommonErrorCode.COMMON_INVALID_INPUT.message(), null);
+		}
+		return handleUnexpected(e);
+	}
+
+	/**
+	 * multipart 가 아닌 요청으로 업로드하면 400. 원인이 IOException(임시 저장소 쓰기 실패 등)이면 서버 쪽 문제일 수 있어
+	 * 500 으로 두고 로그를 남긴다. 업로드 한도 초과(MaxUploadSizeExceededException)는 아래 전용 처리기가 잡는다
+	 */
+	@ExceptionHandler(MultipartException.class)
+	public ResponseEntity<ApiResponse<Void>> handleMultipart(MultipartException e) {
+		if (e.getCause() instanceof IOException) {
+			return handleUnexpected(e);
+		}
 		return toResponse(CommonErrorCode.COMMON_INVALID_INPUT, CommonErrorCode.COMMON_INVALID_INPUT.message(), null);
 	}
 
