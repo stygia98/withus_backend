@@ -123,6 +123,7 @@ public class CampaignService {
 			throw new BusinessException(CampaignErrorCode.CAMPAIGN_INVALID_STATUS,
 				"DRAFT 상태의 캠페인만 수정할 수 있습니다.", null);
 		}
+		sendLogMapper.deleteUnstartedCampaignPending(campaignId); // 세그먼트·템플릿이 바뀌었을 수 있어 옛 적재분을 치운다
 		return existing;
 	}
 
@@ -210,6 +211,9 @@ public class CampaignService {
 			throw new BusinessException(CampaignErrorCode.CAMPAIGN_INVALID_STATUS,
 				"SCHEDULED 상태의 캠페인만 예약을 취소할 수 있습니다.", null);
 		}
+		// 시작이 실패해 남았을 수 있는 적재분을 치운다 — 정리가 start() 에서만 일어나면 다시 시작하지 않는 캠페인의 고아가 남아
+		// claimBatch 가 폴링마다 훑는다(이슈 #53 3번)
+		sendLogMapper.deleteUnstartedCampaignPending(campaignId);
 		campaign.setStatus(CampaignStatus.DRAFT);
 		campaign.setScheduledAt(null);
 		return campaign;
