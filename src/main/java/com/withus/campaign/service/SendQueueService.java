@@ -120,6 +120,7 @@ public class SendQueueService {
 				.status(sendable ? SendStatus.PENDING : SendStatus.SKIPPED)
 				.kind(kind)
 				.priority(priority)
+				.errorMessage(sendable ? null : "NOT_SENDABLE") // 발송 직전 재확인 탈락과 같은 사유 코드
 				.build());
 		}
 		return logs;
