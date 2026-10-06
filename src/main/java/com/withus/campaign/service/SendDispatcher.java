@@ -236,6 +236,9 @@ public class SendDispatcher {
 	}
 
 	private Template resolveTemplate(SendLog sendLog) {
+		if (sendLog.getKind() == SendKind.TEST) {
+			return templateMapper.findById(sendLog.getTemplateId());
+		}
 		Long templateId = sendLog.getStepId() != null
 			? templateMapper.findTemplateIdByStepId(sendLog.getStepId())
 			: templateMapper.findTemplateIdByCampaignId(sendLog.getCampaignId());

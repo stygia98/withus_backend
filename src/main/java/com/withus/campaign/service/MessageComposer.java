@@ -9,6 +9,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import com.withus.campaign.domain.CustomerPlaceholderSource;
+import com.withus.campaign.domain.SendKind;
 import com.withus.campaign.domain.SendLog;
 import com.withus.campaign.domain.Template;
 import com.withus.campaign.mapper.SendLogMapper;
@@ -21,6 +22,7 @@ import com.withus.tracking.service.TrackingLinkService;
 /**
  * 재확인(SendRecheck)을 통과한 건만 렌더링한다(발송 큐 Plan 9장). 순서: 쿠폰 발급(연결된 경우만, 유효기간 밖이면
  * SKIPPED COUPON_INVALID) → 치환자 치환 → 광고 문구 삽입 → (EMAIL) 추적 치환 → (EMAIL) List-Unsubscribe 헤더.
+ * kind=TEST 는 고객이 없어 쿠폰 발급·추적 치환을 하지 않고 고정 샘플 값과 예시 쿠폰 링크로 채운다(API_SPEC 5장).
  */
 @Component
 public class MessageComposer {
@@ -51,11 +53,13 @@ public class MessageComposer {
 	 */
 	public Optional<OutboundMessage> compose(SendLog sendLog, Template template, String unsubscribeUrl,
 			String unsubscribeOneClickUrl) {
-		Long couponId = sendLog.getStepId() != null
-			? sendLogMapper.findCouponIdByStepId(sendLog.getStepId())
-			: sendLogMapper.findCouponIdByCampaignId(sendLog.getCampaignId());
+		boolean test = sendLog.getKind() == SendKind.TEST;
+		Long couponId = test ? null
+			: sendLog.getStepId() != null
+				? sendLogMapper.findCouponIdByStepId(sendLog.getStepId())
+				: sendLogMapper.findCouponIdByCampaignId(sendLog.getCampaignId());
 
-		String couponUrl = "";
+		String couponUrl = test ? trackingBaseUrl + "/c/example" : "";
 		if (couponId != null) {
 			if (!Boolean.TRUE.equals(sendLogMapper.isCouponValid(couponId))) {
 				sendLogMapper.recordSkippedCoupon(sendLog.getSendLogId());
@@ -65,7 +69,9 @@ public class MessageComposer {
 			couponUrl = trackingBaseUrl + "/c/" + token;
 		}
 
-		Map<String, String> values = placeholderValues(sendLog.getCustomerId(), couponUrl);
+		Map<String, String> values = test
+			? placeholderValues(TemplatePreviewService.FIXED_SAMPLE, couponUrl)
+			: placeholderValues(sendLog.getCustomerId(), couponUrl);
 		boolean isAd = template.isAd();
 
 		if (sendLog.getChannel() == Channel.EMAIL) {
@@ -73,7 +79,7 @@ public class MessageComposer {
 				isAd);
 			String rendered = placeholderRenderer.renderHtml(template.getBody(), values);
 			String withAd = adCopyInserter.insertEmailBody(rendered, isAd, unsubscribeUrl);
-			String body = trackingLinkService.rewrite(withAd, sendLog.getSendLogId());
+			String body = test ? withAd : trackingLinkService.rewrite(withAd, sendLog.getSendLogId());
 			Map<String, String> headers = Map.of(
 				"List-Unsubscribe", "<" + unsubscribeOneClickUrl + ">",
 				"List-Unsubscribe-Post", "List-Unsubscribe=One-Click");
