@@ -112,4 +112,68 @@ class CampaignMapperTest {
 		assertThat(conflicting).isEqualTo(0);
 		assertThat(campaignMapper.findById(campaign.getCampaignId()).getStatus()).isEqualTo(CampaignStatus.ACTIVE);
 	}
+
+	@Test
+	void 선점한_뒤에_같은_시각을_읽고_온_두번째_요청은_선점하지_못한다() {
+		Campaign campaign = newCampaign(CampaignType.ONE_TIME, CampaignStatus.DRAFT);
+		campaignMapper.insert(campaign);
+		var readAt = campaignMapper.findById(campaign.getCampaignId()).getUpdatedAt();
+
+		var first = campaignMapper.claimStart(campaign.getCampaignId(), readAt);
+		// 선점은 updated_at 을 바꾸지 않으므로, 선점 뒤에 getOrThrow 한 요청도 같은 readAt 을 읽는다
+		var readAfterClaim = campaignMapper.findById(campaign.getCampaignId()).getUpdatedAt();
+		var second = campaignMapper.claimStart(campaign.getCampaignId(), readAfterClaim);
+
+		assertThat(first).isNotNull();
+		assertThat(readAfterClaim).as("선점은 updated_at 을 건드리지 않는다").isEqualTo(readAt);
+		assertThat(second).as("한쪽만 통과한다 (PR #54 리뷰)").isNull();
+	}
+
+	@Test
+	void 선점을_풀면_다시_선점할_수_있고_남의_선점은_풀리지_않는다() {
+		Campaign campaign = newCampaign(CampaignType.ONE_TIME, CampaignStatus.DRAFT);
+		campaignMapper.insert(campaign);
+		var readAt = campaignMapper.findById(campaign.getCampaignId()).getUpdatedAt();
+		var claimedAt = campaignMapper.claimStart(campaign.getCampaignId(), readAt);
+
+		assertThat(campaignMapper.releaseStart(campaign.getCampaignId(), claimedAt.plusSeconds(1))).as("다른 값은 풀지 않는다").isZero();
+		assertThat(campaignMapper.releaseStart(campaign.getCampaignId(), claimedAt)).isEqualTo(1);
+
+		assertThat(campaignMapper.claimStart(campaign.getCampaignId(), readAt)).isNotNull();
+	}
+
+	@Test
+	void 선점_뒤에_수정이나_취소가_끼면_ACTIVE로_바뀌지_않는다() {
+		Campaign campaign = newCampaign(CampaignType.ONE_TIME, CampaignStatus.SCHEDULED);
+		campaignMapper.insert(campaign);
+		var readAt = campaignMapper.findById(campaign.getCampaignId()).getUpdatedAt();
+		var claimedAt = campaignMapper.claimStart(campaign.getCampaignId(), readAt);
+
+		// 적재 중에 사용자가 예약을 취소했다(updated_at 이 바뀐다)
+		jdbcTemplate.update("UPDATE campaign SET status = 'DRAFT', updated_at = clock_timestamp() + interval '1 second' WHERE campaign_id = ?", campaign.getCampaignId());
+
+		assertThat(campaignMapper.start(campaign.getCampaignId(), readAt, claimedAt)).isZero();
+		assertThat(jdbcTemplate.queryForObject("SELECT status FROM campaign WHERE campaign_id = ?", String.class, campaign.getCampaignId())).isEqualTo("DRAFT");
+	}
+
+	@Test
+	void 선점_뒤에_아무도_끼지_않으면_ACTIVE가_되고_선점이_풀린다() {
+		Campaign campaign = newCampaign(CampaignType.ONE_TIME, CampaignStatus.DRAFT);
+		campaignMapper.insert(campaign);
+		var readAt = campaignMapper.findById(campaign.getCampaignId()).getUpdatedAt();
+		var claimedAt = campaignMapper.claimStart(campaign.getCampaignId(), readAt);
+
+		assertThat(campaignMapper.start(campaign.getCampaignId(), readAt, claimedAt)).isEqualTo(1);
+		assertThat(jdbcTemplate.queryForObject("SELECT status FROM campaign WHERE campaign_id = ?", String.class, campaign.getCampaignId())).isEqualTo("ACTIVE");
+		assertThat(jdbcTemplate.queryForObject("SELECT start_claimed_at IS NULL FROM campaign WHERE campaign_id = ?", Boolean.class, campaign.getCampaignId())).isTrue();
+	}
+
+	@Test
+	void 선점하지_않은_요청의_전환은_거부된다() {
+		Campaign campaign = newCampaign(CampaignType.ONE_TIME, CampaignStatus.DRAFT);
+		campaignMapper.insert(campaign);
+		var readAt = campaignMapper.findById(campaign.getCampaignId()).getUpdatedAt();
+
+		assertThat(campaignMapper.start(campaign.getCampaignId(), readAt, readAt)).isZero();
+	}
 }

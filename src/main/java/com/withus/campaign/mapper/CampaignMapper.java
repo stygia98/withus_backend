@@ -48,8 +48,22 @@ public interface CampaignMapper {
 	/** SCHEDULED → DRAFT, scheduled_at 해제(낙관적 검사). @return 바뀐 행 수 */
 	int cancelSchedule(long campaignId);
 
-	/** DRAFT·SCHEDULED → ACTIVE, started_at 설정(낙관적 검사). @return 바뀐 행 수 */
-	int start(long campaignId);
+	/**
+	 * 시작 선점(이슈 #52, PR #54 리뷰): DRAFT·SCHEDULED 이고 updated_at 이 readAt 이며 아무도 선점하지 않았을 때만(10분 넘은 낡은
+	 * 선점은 무시) start_claimed_at 을 찍고 그 값을 돌려준다. updated_at 은 바꾸지 않으므로 선점 뒤에 읽어 온 다른 요청도
+	 * 같은 readAt 으로 시도하지만 이미 선점돼 있어 null 이 된다. 선점하지 못하면 null
+	 */
+	OffsetDateTime claimStart(@Param("campaignId") long campaignId, @Param("readAt") OffsetDateTime readAt);
+
+	/** 내 선점(claimedAt)을 푼다. 시작이 실패하거나 중단됐을 때 부른다. @return 풀린 행 수 */
+	int releaseStart(@Param("campaignId") long campaignId, @Param("claimedAt") OffsetDateTime claimedAt);
+
+	/**
+	 * DRAFT·SCHEDULED → ACTIVE, started_at 설정, 선점 해제(낙관적 검사). 내 선점이 유지되고 선점 뒤 수정·예약 취소로
+	 * updated_at 이 바뀌지 않았을 때만 바뀐다. @return 바뀐 행 수
+	 */
+	int start(@Param("campaignId") long campaignId, @Param("readAt") OffsetDateTime readAt,
+		@Param("claimedAt") OffsetDateTime claimedAt);
 
 	/** 예약 시각이 지난 SCHEDULED 캠페인 ID 목록(캠페인 4/4) */
 	List<Long> findDueScheduled();

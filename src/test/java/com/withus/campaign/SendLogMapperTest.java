@@ -3,6 +3,7 @@ package com.withus.campaign;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -302,6 +303,18 @@ class SendLogMapperTest {
 	}
 
 	@Test
+	void 미리보기_샘플_조회는_삭제된_고객을_제외한다() {
+		// 같은 SqlSession 의 1차 캐시 때문에 같은 쿼리·파라미터는 jdbcTemplate 갱신 뒤에도 첫 결과가 돌아온다 —
+		// 살아 있는 고객과 삭제한 고객을 서로 다른 id 로 조회한다
+		long deletedCustomerId = newCustomer();
+		jdbcTemplate.update("UPDATE customer SET deleted_yn = 'Y' WHERE customer_id = ?", deletedCustomerId);
+
+		assertThat(sendLogMapper.findPreviewSource(customerId)).isNotNull();
+		assertThat(sendLogMapper.findPreviewSource(deletedCustomerId)).isNull();
+		assertThat(sendLogMapper.findPlaceholderSource(deletedCustomerId)).isNotNull(); // 발송용 조회는 그대로
+	}
+
+	@Test
 	void DRAFT_캠페인의_TEST_발송은_시작_전에도_선점된다() {
 		long draftCampaignId = newOneTimeCampaign(newSegment());
 		jdbcTemplate.update("UPDATE campaign SET status = 'DRAFT' WHERE campaign_id = ?", draftCampaignId);
@@ -314,14 +327,17 @@ class SendLogMapperTest {
 
 		List<SendLog> claimed = sendLogMapper.claimBatch();
 
-		assertThat(claimed).extracting(SendLog::getCustomerId)
-			.as("PRD 8.4 테스트 발송만 예외 — CAMPAIGN 행은 막히고 TEST 행은 나간다")
+		assertThat(claimed).filteredOn(log -> Objects.equals(log.getCampaignId(), draftCampaignId))
+			.extracting(SendLog::getCustomerId)
+			.as("PRD 8.4 테스트 발송만 예외 — CAMPAIGN 행은 막히고 TEST 행은 나간다 (공유 DB 의 다른 행은 보지 않는다)")
 			.containsOnly(testCustomerId);
 	}
 
 	@Test
 	void 시작_실패로_남은_PENDING만_지우고_SENDING_이상과_TEST는_남긴다() {
 		long campaignId = newOneTimeCampaign(newSegment());
+		// 삭제는 DRAFT·SCHEDULED 캠페인에서만 일어난다(이슈 #52 상태 가드) — newOneTimeCampaign 은 ACTIVE 로 만든다
+		jdbcTemplate.update("UPDATE campaign SET status = 'DRAFT' WHERE campaign_id = ?", campaignId);
 		long sentCustomerId = newCustomer();
 		long testCustomerId = newCustomer();
 		sendLogMapper.insertOneTimeBatch(List.of(
@@ -343,5 +359,57 @@ class SendLogMapperTest {
 	@Test
 	void 없는_쿠폰의_유효기간_확인은_null이다() {
 		assertThat(sendLogMapper.isCouponValid(-1L)).isNull();
+	}
+
+	@Test
+	void ACTIVE가_된_캠페인의_PENDING은_고아_삭제에서_지워지지_않는다() {
+		long campaignId = newOneTimeCampaign(newSegment());
+		long retryCustomerId = newCustomer();
+		sendLogMapper.insertOneTimeBatch(List.of(oneTimeLog(campaignId, customerId), oneTimeLog(campaignId, retryCustomerId)));
+		jdbcTemplate.update("UPDATE send_log SET attempt_count = 1 WHERE campaign_id = ? AND customer_id = ?",
+			campaignId, retryCustomerId);
+
+		jdbcTemplate.update("UPDATE campaign SET status = 'ACTIVE' WHERE campaign_id = ?", campaignId);
+		assertThat(sendLogMapper.deleteUnstartedCampaignPending(campaignId)).as("ACTIVE 면 아무것도 지우지 않는다").isZero();
+
+		jdbcTemplate.update("UPDATE campaign SET status = 'DRAFT' WHERE campaign_id = ?", campaignId);
+		assertThat(sendLogMapper.deleteUnstartedCampaignPending(campaignId))
+			.as("DRAFT 여도 이미 시도한(attempt_count > 0) 행은 남긴다").isEqualTo(1);
+	}
+
+	@Test
+	void 재시작_전_고아_PENDING과_SKIPPED는_지워지고_백로그에서도_빠진다() {
+		long backlogBefore = sendLogMapper.countPending();
+		long campaignId = newOneTimeCampaign(newSegment());
+		jdbcTemplate.update("UPDATE campaign SET status = 'DRAFT' WHERE campaign_id = ?", campaignId);
+		long skippedCustomerId = newCustomer();
+		sendLogMapper.insertOneTimeBatch(List.of(oneTimeLog(campaignId, customerId), oneTimeLog(campaignId, skippedCustomerId)));
+		jdbcTemplate.update("UPDATE send_log SET status = 'SKIPPED', error_message = 'NO_CONSENT' "
+			+ "WHERE campaign_id = ? AND customer_id = ?", campaignId, skippedCustomerId);
+
+		// 고아 PENDING 은 막혀 있으므로 백로그에 세지 않는다 (DRAFT 라 claimBatch 도 못 가져간다)
+		long backlogWithOrphans = sendLogMapper.countPending();
+		int deleted = sendLogMapper.deleteUnstartedCampaignPending(campaignId);
+
+		assertThat(deleted).as("PENDING 1건 + SKIPPED 1건").isEqualTo(2);
+		assertThat(backlogWithOrphans).as("고아가 있어도 백로그는 그대로").isEqualTo(backlogBefore);
+		assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM send_log WHERE campaign_id = ?", Long.class,
+			campaignId)).isZero();
+	}
+
+	@Test
+	void DRAFT_SCHEDULED_PAUSED_캠페인의_막힌_행은_countPending에_세지_않는다() {
+		long segmentId = newSegment();
+		long before = sendLogMapper.countPending();
+		for (String status : List.of("DRAFT", "SCHEDULED", "PAUSED")) {
+			long campaignId = newOneTimeCampaign(segmentId);
+			jdbcTemplate.update("UPDATE campaign SET status = ? WHERE campaign_id = ?", status, campaignId);
+			sendLogMapper.insertOneTimeBatch(List.of(oneTimeLog(campaignId, newCustomer())));
+		}
+		long activeCampaignId = newOneTimeCampaign(segmentId);
+		jdbcTemplate.update("UPDATE campaign SET status = 'ACTIVE' WHERE campaign_id = ?", activeCampaignId);
+		sendLogMapper.insertOneTimeBatch(List.of(oneTimeLog(activeCampaignId, newCustomer())));
+
+		assertThat(sendLogMapper.countPending() - before).as("ACTIVE 캠페인의 PENDING 1건만 센다").isEqualTo(1);
 	}
 }

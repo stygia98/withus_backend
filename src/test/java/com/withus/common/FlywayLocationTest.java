@@ -33,6 +33,22 @@ class FlywayLocationTest {
 		assertThat(names("classpath*:db/seed/local/R__seed_local.sql")).hasSize(1);
 	}
 
+	/**
+	 * Flyway 는 반복 마이그레이션(R__)을 설명(파일명의 R__ 뒤)의 사전순으로 실행한다. 다른 local 시드는 고객·쿠폰을 넣는
+	 * R__seed_local.sql 을 전제로 하므로 그 뒤에 와야 한다 (예: R__seed_demo 는 seed_local 보다 앞이라 안 된다, project #12)
+	 */
+	@Test
+	void 다른_local_시드는_R__seed_local_뒤에_실행된다() throws IOException {
+		List<String> descriptions = names("classpath*:db/seed/local/R__*.sql").stream()
+			// Flyway 는 설명의 '_' 를 공백으로 바꿔 비교한다
+			.map(path -> path.substring(path.lastIndexOf("R__") + 3, path.length() - ".sql".length()).replace('_', ' '))
+			.sorted()
+			.toList();
+
+		assertThat(descriptions).contains("seed local demo");
+		assertThat(descriptions.getFirst()).isEqualTo("seed local");
+	}
+
 	/** 클래스패스 리소스의 db/ 아래 상대 경로 (예: db/migration/V1__init.sql) */
 	private static List<String> names(String pattern) throws IOException {
 		return Arrays.stream(RESOLVER.getResources(pattern)).map(FlywayLocationTest::relativePath).toList();

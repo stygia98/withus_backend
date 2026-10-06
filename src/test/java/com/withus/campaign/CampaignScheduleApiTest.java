@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.UUID;
 
@@ -96,6 +97,11 @@ class CampaignScheduleApiTest {
 			""", Long.class, memberId);
 	}
 
+	/** 실행일 기준 서울의 내일 hh:mm — 고정 날짜는 하루만 지나도 과거 시각(400)이 되어 테스트가 깨진다 */
+	private static String seoulTomorrow(int hour, int minute) {
+		return LocalDate.now(ZoneId.of("Asia/Seoul")).plusDays(1).atTime(hour, minute) + ":00+09:00";
+	}
+
 	private ResultActions write(String url, Cookie auth, String json) throws Exception {
 		return mvc.perform(post(url).cookie(auth, xsrf).header("X-XSRF-TOKEN", xsrf.getValue())
 			.contentType(MediaType.APPLICATION_JSON).content(json));
@@ -120,11 +126,12 @@ class CampaignScheduleApiTest {
 
 		write("/api/v1/campaigns/" + campaignId + "/schedule", access,
 			"""
-			{"scheduledAt":"2026-10-05T21:00:00+09:00"}
-			""")
+			{"scheduledAt":"%s"}
+			""".formatted(seoulTomorrow(21, 0)))
 			.andExpect(status().isUnprocessableContent())
 			.andExpect(jsonPath("$.error.code").value("CAMPAIGN_SEND_WINDOW_EXCEEDED"))
-			.andExpect(jsonPath("$.error.details.nextAvailableAt").value("2026-10-06T08:00:00+09:00"));
+			.andExpect(jsonPath("$.error.details.nextAvailableAt").value(
+				LocalDate.now(ZoneId.of("Asia/Seoul")).plusDays(2).atTime(8, 0) + ":00+09:00"));
 	}
 
 	@Test
@@ -143,7 +150,7 @@ class CampaignScheduleApiTest {
 		}
 
 		mvc.perform(get("/api/v1/campaigns/" + campaignId + "/estimate")
-				.param("startAt", "2026-10-05T20:49:00+09:00").cookie(access))
+				.param("startAt", seoulTomorrow(20, 49)).cookie(access))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.data.allowed").value(false))
 			.andExpect(jsonPath("$.data.reason").value("SEND_WINDOW_EXCEEDED"))

@@ -31,6 +31,12 @@ public class TemplateService {
 	private static final Set<String> ALLOWED_PLACEHOLDERS = Set.of(
 		"name", "email", "region", "totalPurchase", "couponUrl");
 
+	/** 맨 앞의 (광고) 표기. [광고]·( 광고 ) 같은 변형도 같은 뜻이라 함께 막는다 */
+	private static final Pattern LEADING_AD_MARK = Pattern.compile("^\\s*[(\\[]\\s*광고\\s*[)\\]]");
+
+	/** 시스템이 넣는 수신거부 안내 문구와 080 수신거부 번호 */
+	private static final Pattern UNSUBSCRIBE_COPY = Pattern.compile("무료\\s*수신\\s*거부|080[-\\s]?\\d{3,4}[-\\s]?\\d{4}");
+
 	/** 고객 목록(CustomerService)과 같은 상한 */
 	private static final int MAX_PAGE_SIZE = 100;
 
@@ -114,6 +120,37 @@ public class TemplateService {
 		}
 		validatePlaceholders(template.getSubject());
 		validatePlaceholders(template.getBody());
+		validateAdCopy(template);
+	}
+
+	/**
+	 * 광고성 템플릿에 시스템이 자동으로 넣는 문구를 직접 쓰면 두 번 나가거나(`(광고) (광고) …`) 시스템 설정과 다른 번호가
+	 * 노출된다(PRD 8.4, CLAUDE.md 6장 11번). 저장 단계에서 막는다 — 프론트 검증만으로는 API 직접 호출로 우회된다.
+	 * 비광고 템플릿은 시스템이 아무것도 넣지 않으므로 검사하지 않는다
+	 */
+	private void validateAdCopy(Template template) {
+		if (!template.isAd()) {
+			return;
+		}
+		if (template.getChannel() == Channel.EMAIL && template.getSubject() != null
+			&& LEADING_AD_MARK.matcher(template.getSubject()).find()) {
+			throw adCopyNotAllowed("subject", "제목 앞의 (광고)");
+		}
+		String body = template.getBody();
+		if (body == null) {
+			return;
+		}
+		if (template.getChannel() == Channel.SMS && LEADING_AD_MARK.matcher(body).find()) {
+			throw adCopyNotAllowed("body", "본문 맨 앞의 (광고)");
+		}
+		if (UNSUBSCRIBE_COPY.matcher(body).find()) {
+			throw adCopyNotAllowed("body", "수신거부 안내 문구나 080 수신거부 번호");
+		}
+	}
+
+	private BusinessException adCopyNotAllowed(String field, String what) {
+		return new BusinessException(TemplateErrorCode.TEMPLATE_AD_COPY_NOT_ALLOWED,
+			TemplateErrorCode.TEMPLATE_AD_COPY_NOT_ALLOWED.message(), Map.of("field", field, "found", what));
 	}
 
 	private void validatePlaceholders(String text) {
