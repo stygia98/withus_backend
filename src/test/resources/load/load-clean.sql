@@ -28,7 +28,12 @@ DELETE FROM consent_history WHERE customer_id IN (SELECT customer_id FROM custom
 DELETE FROM purchase WHERE customer_id IN (SELECT customer_id FROM customer WHERE email LIKE 'load-%@load.withus.local');
 DELETE FROM customer WHERE email LIKE 'load-%@load.withus.local';
 
+-- 부하 중 AI-03 요약이 만들어졌으면 campaign FK 에 걸린다
+DELETE FROM ai_report WHERE campaign_id IN (SELECT campaign_id FROM campaign WHERE name LIKE '[LOAD]%');
 DELETE FROM campaign WHERE name LIKE '[LOAD]%';
+-- 부하 템플릿에 추적 링크가 생겼으면(링크 치환·클릭 측정) template FK 에 걸린다. 링크를 참조하는 이벤트부터 지운다
+DELETE FROM track_event WHERE link_id IN (SELECT link_id FROM track_link WHERE template_id IN (SELECT template_id FROM template WHERE name LIKE '[LOAD]%'));
+DELETE FROM track_link WHERE template_id IN (SELECT template_id FROM template WHERE name LIKE '[LOAD]%');
 DELETE FROM template WHERE name LIKE '[LOAD]%';
 DELETE FROM segment WHERE name LIKE '[LOAD]%';
 DELETE FROM member WHERE email = 'load-owner@load.withus.local';

@@ -22,6 +22,15 @@
 
 BEGIN;
 
+-- 운영 DB 에 실수로 실행되면 고객 10만 명과 ACTIVE 캠페인의 PENDING 10만 건이 생겨 실제 발송이 시작될 수 있다.
+-- 로컬·시연 시드는 고객이 100건대이므로, 부하 데이터 외 고객이 1,000건을 넘는 DB 에는 적재하지 않는다
+DO $$
+BEGIN
+    IF (SELECT count(*) FROM customer WHERE email NOT LIKE 'load-%@load.withus.local') > 1000 THEN
+        RAISE EXCEPTION '고객이 1,000건을 넘는 DB 입니다. 운영·공용 DB 로 보여 부하 데이터를 적재하지 않습니다(로컬 DB 에서만 실행).';
+    END IF;
+END $$;
+
 -- 이미 있으면 중복 적재하지 않는다
 DO $$
 BEGIN
