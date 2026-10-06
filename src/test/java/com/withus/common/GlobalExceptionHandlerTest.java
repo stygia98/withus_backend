@@ -2,10 +2,13 @@ package com.withus.common;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.io.IOException;
 import java.lang.reflect.Method;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.core.MethodParameter;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.MissingPathVariableException;
 import org.springframework.web.bind.MissingRequestCookieException;
 import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
@@ -76,6 +79,49 @@ class GlobalExceptionHandlerTest {
 		assertThat(handlerOf(new MissingRequestHeaderException("X-Request-Id", null))).isEqualTo("handleBindingFailure");
 		assertThat(handlerOf(new MissingRequestCookieException("SESSION", null))).isEqualTo("handleBindingFailure");
 		assertThat(handlerOf(new MultipartException("Current request is not a multipart request")))
-			.isEqualTo("handleBindingFailure");
+			.isEqualTo("handleMultipart");
+		assertThat(handlerOf(new MissingPathVariableException("campaignId", pathParameter())))
+			.isEqualTo("handleMissingPathVariable");
+	}
+
+	@Test
+	void 경로_변수_누락은_서버_매핑_오류라_500_변환_후_null_은_400() {
+		// 지금 컨트롤러에서는 생기지 않는다. 바인딩 오류를 넓게 400 으로 잡으면서 서버 원인을 가리지 않게 한다 (backend #66 리뷰 후속)
+		var handler = new GlobalExceptionHandler();
+
+		var notMapped = handler.handleMissingPathVariable(new MissingPathVariableException("campaignId", pathParameter()));
+		var convertedToNull = handler
+			.handleMissingPathVariable(new MissingPathVariableException("campaignId", pathParameter(), true));
+
+		assertThat(notMapped.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+		assertThat(notMapped.getBody().error().code()).isEqualTo("COMMON_INTERNAL_ERROR");
+		assertThat(convertedToNull.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+	}
+
+	@Test
+	void multipart_오류는_원인이_IOException_이면_500_아니면_400() {
+		var handler = new GlobalExceptionHandler();
+
+		var notMultipart = handler.handleMultipart(new MultipartException("Current request is not a multipart request"));
+		var storageFailure = handler.handleMultipart(
+			new MultipartException("Failed to parse multipart servlet request", new IOException("임시 파일 쓰기 실패")));
+
+		assertThat(notMultipart.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+		assertThat(storageFailure.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+		assertThat(storageFailure.getBody().error().code()).isEqualTo("COMMON_INTERNAL_ERROR");
+	}
+
+	/** MissingPathVariableException 의 메시지(500 로그)가 파라미터 타입을 읽으므로 실제 메서드 파라미터를 쓴다 */
+	private static MethodParameter pathParameter() {
+		try {
+			return new MethodParameter(GlobalExceptionHandlerTest.class.getDeclaredMethod("sample", long.class), 0);
+		}
+		catch (NoSuchMethodException e) {
+			throw new IllegalStateException(e);
+		}
+	}
+
+	@SuppressWarnings("unused")
+	private void sample(long campaignId) {
 	}
 }
