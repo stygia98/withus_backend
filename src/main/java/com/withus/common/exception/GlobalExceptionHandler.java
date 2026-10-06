@@ -10,6 +10,7 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
@@ -44,6 +45,12 @@ public class GlobalExceptionHandler {
 	@ExceptionHandler({ HttpMessageNotReadableException.class, MethodArgumentTypeMismatchException.class })
 	public ResponseEntity<ApiResponse<Void>> handleBadRequest(Exception e) {
 		return toResponse(CommonErrorCode.COMMON_INVALID_INPUT, CommonErrorCode.COMMON_INVALID_INPUT.message(), null);
+	}
+
+	/** 필수 @RequestParam 누락: 메시지에는 빠진 파라미터 이름만 넣는다 (사용자 입력값은 넣지 않음) */
+	@ExceptionHandler(MissingServletRequestParameterException.class)
+	public ResponseEntity<ApiResponse<Void>> handleMissingParameter(MissingServletRequestParameterException e) {
+		return toResponse(CommonErrorCode.COMMON_INVALID_INPUT, "필수 요청 값이 없습니다: " + e.getParameterName(), null);
 	}
 
 	/** multipart 한도 초과는 컨트롤러 전에 나므로 서비스의 크기 검사 대신 여기서 400 으로 바꾼다 (API_SPEC 12장) */

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 import com.withus.common.exception.GlobalExceptionHandler;
@@ -17,5 +18,15 @@ class GlobalExceptionHandlerTest {
 
 		assertThat(res.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
 		assertThat(res.getBody().error().code()).isEqualTo("UPLOAD_FILE_TOO_LARGE");
+	}
+
+	@Test
+	void 필수_파라미터_누락은_COMMON_INVALID_INPUT_400() {
+		var res = new GlobalExceptionHandler()
+			.handleMissingParameter(new MissingServletRequestParameterException("targetCount", "long"));
+
+		assertThat(res.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+		assertThat(res.getBody().error().code()).isEqualTo("COMMON_INVALID_INPUT");
+		assertThat(res.getBody().error().message()).isEqualTo("필수 요청 값이 없습니다: targetCount");
 	}
 }
