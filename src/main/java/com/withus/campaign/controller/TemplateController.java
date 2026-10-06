@@ -20,6 +20,8 @@ import com.withus.campaign.dto.TemplateResponse;
 import com.withus.campaign.dto.TemplateUpdateRequest;
 import com.withus.campaign.service.TemplateService;
 import com.withus.campaign.service.TemplatePreviewService;
+import com.withus.campaign.service.TemplateTestSendService;
+import com.withus.campaign.dto.TemplateTestSendRequest;
 import com.withus.campaign.dto.TemplatePreviewRequest;
 import com.withus.campaign.dto.TemplatePreviewResponse;
 import com.withus.common.domain.Channel;
@@ -37,10 +39,13 @@ public class TemplateController {
 
 	private final TemplateService templateService;
 	private final TemplatePreviewService templatePreviewService;
+	private final TemplateTestSendService templateTestSendService;
 
-	public TemplateController(TemplateService templateService, TemplatePreviewService templatePreviewService) {
+	public TemplateController(TemplateService templateService, TemplatePreviewService templatePreviewService,
+			TemplateTestSendService templateTestSendService) {
 		this.templateService = templateService;
 		this.templatePreviewService = templatePreviewService;
+		this.templateTestSendService = templateTestSendService;
 	}
 
 	@Operation(summary = "템플릿 목록", description = "channel 필터(EMAIL/SMS, 생략 시 전체). page 는 0부터, size 기본 20.")
@@ -112,5 +117,17 @@ public class TemplateController {
 			.anyMatch(a -> a.getAuthority().equals("ROLE_OWNER") || a.getAuthority().equals("ROLE_MANAGER"));
 		return ApiResponse.ok(templatePreviewService.preview(templateId, request.sampleCustomerId(),
 			request.segmentId(), canReadCustomer));
+	}
+
+	@Operation(summary = "테스트 발송",
+		description = "recipient 1건을 kind=TEST, priority 1 로 발송 큐에 적재한다. 고정 샘플 값으로 치환하고 쿠폰 발급·추적 치환은 하지 않으며 "
+			+ "쿠폰·수신거부 링크는 예시 주소다. 발송 시간 제한과 수신동의 확인은 없고 모든 통계에서 제외된다. "
+			+ "오류: COMMON_INVALID_INPUT(400, 이메일 형식), CUSTOMER_INVALID_PHONE(400), TEMPLATE_NOT_FOUND(404).")
+	@PreAuthorize("hasAnyRole('OWNER','MANAGER','STAFF')")
+	@PostMapping("/{templateId}/test-send")
+	public ApiResponse<Void> testSend(@PathVariable long templateId,
+		@Valid @RequestBody TemplateTestSendRequest request) {
+		templateTestSendService.testSend(templateId, request.recipient());
+		return ApiResponse.ok(null);
 	}
 }

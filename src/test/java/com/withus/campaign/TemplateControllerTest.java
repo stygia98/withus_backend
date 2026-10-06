@@ -172,6 +172,50 @@ class TemplateControllerTest {
 	}
 
 	/** 응답 JSON 에서 "templateId":123 패턴만 뽑아내는 간단 파서 (별도 ObjectMapper 의존 없이) */
+	@Test
+	void 테스트_발송은_TEST_큐에_정규화된_수신처로_적재한다() throws Exception {
+		long templateId = extractTemplateId(createEmail("테스트 발송용", "제목", "본문").andReturn().getResponse()
+			.getContentAsString());
+
+		mvc.perform(post("/api/v1/templates/" + templateId + "/test-send").cookie(access, xsrf)
+				.header("X-XSRF-TOKEN", xsrf.getValue()).contentType(MediaType.APPLICATION_JSON)
+				.content("{\"recipient\":\"  Me@Withus.LOCAL \"}"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.success").value(true));
+
+		var row = jdbcTemplate.queryForMap(
+			"SELECT kind, priority, status, channel, recipient, customer_id, campaign_id FROM send_log WHERE template_id = ?",
+			templateId);
+		assertThat(row).containsEntry("kind", "TEST").containsEntry("status", "PENDING")
+			.containsEntry("channel", "EMAIL").containsEntry("recipient", "me@withus.local")
+			.containsEntry("customer_id", null).containsEntry("campaign_id", null);
+		assertThat(((Number) row.get("priority")).intValue()).isEqualTo(1);
+	}
+
+	@Test
+	void 테스트_발송_수신처_형식이_틀리면_400이고_적재하지_않는다() throws Exception {
+		long templateId = extractTemplateId(createEmail("형식 검사용", "제목", "본문").andReturn().getResponse()
+			.getContentAsString());
+
+		mvc.perform(post("/api/v1/templates/" + templateId + "/test-send").cookie(access, xsrf)
+				.header("X-XSRF-TOKEN", xsrf.getValue()).contentType(MediaType.APPLICATION_JSON)
+				.content("{\"recipient\":\"not-an-email\"}"))
+			.andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.error.code").value("COMMON_INVALID_INPUT"));
+
+		Integer count = jdbcTemplate.queryForObject("SELECT count(*) FROM send_log WHERE template_id = ?",
+			Integer.class, templateId);
+		assertThat(count).isZero();
+	}
+
+	@Test
+	void 없는_템플릿의_테스트_발송은_404() throws Exception {
+		mvc.perform(post("/api/v1/templates/999999999/test-send").cookie(access, xsrf)
+				.header("X-XSRF-TOKEN", xsrf.getValue()).contentType(MediaType.APPLICATION_JSON)
+				.content("{\"recipient\":\"me@withus.local\"}"))
+			.andExpect(status().isNotFound());
+	}
+
 	private long extractTemplateId(String json) {
 		var matcher = java.util.regex.Pattern.compile("\"templateId\":(\\d+)").matcher(json);
 		assertThat(matcher.find()).as("응답에 templateId 가 있어야 한다: " + json).isTrue();
