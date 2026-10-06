@@ -25,6 +25,7 @@ import com.withus.workflow.domain.WorkflowValidationResult;
 import com.withus.workflow.domain.WorkflowCheck;
 import com.withus.workflow.dto.WorkflowSaveRequest;
 import com.withus.workflow.dto.WorkflowStepRequest;
+import com.withus.workflow.mapper.WorkflowInstanceMapper;
 import com.withus.workflow.mapper.WorkflowStepMapper;
 import com.withus.workflow.service.WorkflowService;
 import com.withus.workflow.service.WorkflowValidator;
@@ -37,7 +38,7 @@ class WorkflowServiceTemplateCheckTest {
 	WorkflowStepMapper stepMapper = mock(WorkflowStepMapper.class);
 	CampaignService campaignService = mock(CampaignService.class);
 	TemplateMapper templateMapper = mock(TemplateMapper.class);
-	WorkflowService service = new WorkflowService(stepMapper, campaignService, templateMapper,
+	WorkflowService service = new WorkflowService(stepMapper, mock(WorkflowInstanceMapper.class), campaignService, templateMapper,
 		mock(SendLogMapper.class), new WorkflowValidator(), JsonMapper.builder().build());
 
 	private WorkflowSaveRequest request() {

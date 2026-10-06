@@ -40,9 +40,10 @@ WHERE instance_id IN (
 RETURNING *;
 ```
 
+- 코드는 PAUSED 제외보다 엄격하게 `c.status = 'ACTIVE'` 인 캠페인만 선점한다(DRAFT·SCHEDULED·COMPLETED 도 제외).
 - PAUSED 제외는 발송 큐 Plan 15장 A1과 같은 이유다: 제외하지 않으면 일시정지된 캠페인의 인스턴스가 매 주기 500개 슬롯을 차지해 다른 캠페인이 밀린다. 재개(ACTIVE 복귀)하면 다음 주기에 자연히 다시 선점되므로 별도의 "깨우기" 로직이 필요 없다.
 - `@Scheduled(fixedDelay = 60000)`(1분)로 반복 실행하고, 발송 큐의 `SendDispatcher.dispatch()`처럼 처리할 건이 없을 때까지 선점을 반복한다(10만 건이 한 주기 안에서 소진, PRD 6.5-1).
-- `withus.scheduler.workflow-scheduler.enabled` 토글을 둔다(발송 큐 Plan에서 확립한 패턴 재사용 — 커밋 기반 통합 테스트에서 끈다).
+- `withus.scheduler.workflow-engine.enabled` 토글을 둔다(발송 큐 Plan에서 확립한 패턴 재사용 — 커밋 기반 통합 테스트에서 끈다).
 
 ### 2.2 노드 연속 실행과 트랜잭션 경계
 
@@ -138,7 +139,7 @@ UPDATE workflow_instance SET status = 'WAITING', next_run_at = now()
 WHERE status = 'RUNNING' AND updated_at < now() - INTERVAL '10 minutes';
 ```
 
-- **오류 재시도**: tx2(2.2) 실행 중 예외가 나면 롤백되고(이미 적재된 SEND도 함께 롤백 — 재시도 때 다시 적재되므로 안전), 별도의 짧은 트랜잭션(tx3)으로 `retry_count += 1`, `next_run_at = now + 5분`, `status = WAITING`을 기록한다. `retry_count`가 3을 넘으면 재시도 대신 `status = FAILED`, `last_error`에 예외 메시지를 남긴다.
+- **오류 재시도**: tx2(2.2) 실행 중 예외가 나면 롤백되고(이미 적재된 SEND도 함께 롤백 — 재시도 때 다시 적재되므로 안전), 별도의 짧은 트랜잭션(tx3)으로 `retry_count += 1`, `next_run_at = now + 5분`, `status = WAITING`을 기록한다. `retry_count`가 **3에 이르면(3번째 실패)** 재시도 대신 `status = FAILED`, `last_error`에 예외 메시지를 남긴다(PRD 6.5-5 "3회 실패하면 FAILED", PL 결정 — 발송 큐는 PRD 8.2 "3회를 넘기면"이라 재시도 1·5·15분 뒤 4번째에 FAILED 가 되어 워크플로우와 규칙이 다르다). 노드 실행이 성공해 다음 단계로 넘어가면 `retry_count`·`last_error`를 비운다(서로 다른 단계의 일시 오류가 누적되지 않게).
 
 ## 6. 트리거 (인스턴스 생성)
 

@@ -4,12 +4,14 @@ import java.time.Clock;
 import java.time.LocalTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.withus.campaign.domain.Campaign;
 import com.withus.campaign.domain.CampaignErrorCode;
@@ -17,6 +19,7 @@ import com.withus.campaign.domain.CampaignStatus;
 import com.withus.campaign.domain.CampaignType;
 import com.withus.campaign.domain.SendKind;
 import com.withus.campaign.domain.Template;
+import com.withus.campaign.domain.TriggerType;
 import com.withus.campaign.domain.TemplateErrorCode;
 import com.withus.campaign.dto.CampaignEstimateResponse;
 import com.withus.campaign.mapper.CampaignMapper;
@@ -27,6 +30,10 @@ import com.withus.common.exception.CommonErrorCode;
 import com.withus.common.response.PageResponse;
 import com.withus.coupon.domain.CouponErrorCode;
 import com.withus.segment.service.SegmentService;
+import com.withus.workflow.mapper.WorkflowInstanceMapper;
+import com.withus.workflow.mapper.WorkflowStepMapper;
+import com.withus.workflow.domain.WorkflowStep;
+import com.withus.workflow.service.WorkflowTriggerService;
 
 /**
  * 캠페인 생성·수정·조회·예약·시작 (API_SPEC 6장). 일시정지·종료 등 나머지 상태 전이는
@@ -48,12 +55,17 @@ public class CampaignService {
 	private final SendLogMapper sendLogMapper;
 	private final SegmentService segmentService;
 	private final SendQueueService sendQueueService;
+	private final WorkflowTriggerService workflowTriggerService;
+	private final WorkflowInstanceMapper workflowInstanceMapper;
+	private final WorkflowStepMapper workflowStepMapper;
 	private final SendWindow sendWindow;
 	private final int maxSendRate;
 	private Clock clock = Clock.system(ZoneId.of("Asia/Seoul"));
 
 	public CampaignService(CampaignMapper campaignMapper, TemplateMapper templateMapper, SendLogMapper sendLogMapper,
-			SegmentService segmentService, SendQueueService sendQueueService,
+			SegmentService segmentService, SendQueueService sendQueueService, WorkflowTriggerService workflowTriggerService,
+			WorkflowInstanceMapper workflowInstanceMapper,
+			WorkflowStepMapper workflowStepMapper,
 			@Value("${withus.send-window.start}") String sendWindowStart,
 			@Value("${withus.send-window.end}") String sendWindowEnd,
 			@Value("${ses.max-send-rate}") int maxSendRate) {
@@ -62,6 +74,9 @@ public class CampaignService {
 		this.sendLogMapper = sendLogMapper;
 		this.segmentService = segmentService;
 		this.sendQueueService = sendQueueService;
+		this.workflowTriggerService = workflowTriggerService;
+		this.workflowInstanceMapper = workflowInstanceMapper;
+		this.workflowStepMapper = workflowStepMapper;
 		this.sendWindow = new SendWindow(LocalTime.parse(sendWindowStart), LocalTime.parse(sendWindowEnd));
 		this.maxSendRate = maxSendRate;
 	}
@@ -221,7 +236,7 @@ public class CampaignService {
 
 	/**
 	 * DRAFT·SCHEDULED → ACTIVE. 일회성은 지금 바로 큐에 적재한다(SendQueueService.enqueueOneTime).
-	 * 워크플로우는 상태만 바꾼다 — SEGMENT_SCHEDULED 즉시 트리거는 W3 트리거 작업이 연결한다
+	 * 워크플로우 SEGMENT_SCHEDULED 는 대상 전체의 인스턴스를 만든다(CUSTOMER_REGISTERED 는 상태만 바꾸고 등록 이벤트를 기다린다)
 	 */
 	public Campaign start(long campaignId) {
 		Campaign campaign = getOrThrow(campaignId);
@@ -266,11 +281,108 @@ public class CampaignService {
 			Template template = requireTemplate(campaign.getTemplateId());
 			List<Long> targetIds = segmentService.findTargetCustomers(campaign.getSegmentId());
 			sendQueueService.enqueueOneTime(campaignId, targetIds, template.getChannel(), SendKind.CAMPAIGN);
+		} else {
+			// 저장된 구조 없이 시작하면 인스턴스가 갈 곳이 없다(구조는 저장할 때 검증된다)
+			if (workflowStepMapper.findByCampaignId(campaignId).isEmpty()) {
+				throw new BusinessException(CommonErrorCode.COMMON_INVALID_INPUT, "워크플로우 단계를 먼저 저장하세요.", null);
+			}
+			if (campaign.getTriggerType() == TriggerType.SEGMENT_SCHEDULED) {
+				// 인스턴스도 ACTIVE 전환 전에 만든다 — 인스턴스 선점은 캠페인이 ACTIVE 일 때만이라 전환 전에는 실행되지 않고,
+				// 도중에 실패해도 상태는 그대로라 다시 시작하면 uq_workflow_instance 로 이어서 만들어진다(PR #35 리뷰 🟡4)
+				workflowTriggerService.startSegmentScheduled(campaignId);
+			}
 		}
 		if (campaignMapper.start(campaignId, readAt, claimedAt) == 0) {
 			throw new BusinessException(CampaignErrorCode.CAMPAIGN_INVALID_STATUS,
 				"시작하는 동안 캠페인이 수정되거나 예약이 취소되어 시작하지 않았습니다. 내용을 확인하고 다시 시작하세요.", null);
 		}
+	}
+
+	/** ACTIVE → PAUSED. 일시정지 중에는 인스턴스 실행과 PENDING 발송이 멈춘다(PRD 6.6) */
+	public Campaign pause(long campaignId) {
+		return transition(campaignId, CampaignStatus.ACTIVE, CampaignStatus.PAUSED, "ACTIVE 상태의 캠페인만 일시정지할 수 있습니다.");
+	}
+
+	/** PAUSED → ACTIVE. 밀린 건은 다음 주기에 선점돼 바로 처리된다(광고성 시간 제한은 그대로) */
+	public Campaign resume(long campaignId) {
+		return transition(campaignId, CampaignStatus.PAUSED, CampaignStatus.ACTIVE, "PAUSED 상태의 캠페인만 재개할 수 있습니다.");
+	}
+
+	/**
+	 * ACTIVE·PAUSED → COMPLETED. 진행 중 인스턴스는 같은 트랜잭션에서 CANCELLED 로 바꾼다(PRD 6.6).
+	 * 이미 적재된 PENDING 발송은 발송 직전 재확인에서 SKIPPED(CAMPAIGN_COMPLETED)가 된다
+	 */
+	@Transactional
+	public Campaign complete(long campaignId) {
+		Campaign campaign = getOrThrow(campaignId);
+		if (campaignMapper.completeManually(campaignId) == 0) {
+			throw new BusinessException(CampaignErrorCode.CAMPAIGN_INVALID_STATUS,
+				"ACTIVE·PAUSED 상태의 캠페인만 종료할 수 있습니다.", null);
+		}
+		workflowInstanceMapper.cancelActiveByCampaign(campaignId);
+		campaign.setStatus(CampaignStatus.COMPLETED);
+		return campaign;
+	}
+
+	/**
+	 * 새 DRAFT 로 복제한다(API_SPEC 6장). 템플릿·쿠폰·세그먼트 참조는 그대로 두고, 워크플로우는 노드를 새
+	 * step_id 로 복사하며 next·yes·no 를 새 ID 로 다시 잇는다. 인스턴스·발송 이력은 복사하지 않는다
+	 */
+	@Transactional
+	public Campaign duplicate(long campaignId, long memberId) {
+		Campaign source = getOrThrow(campaignId);
+		Campaign copy = new Campaign();
+		// campaign.name 은 VARCHAR(100) — 접미사를 붙여도 넘지 않게 원래 이름을 잘라 낸다(넘으면 DB 오류 500)
+		String suffix = " (복사)";
+		String base = source.getName().length() + suffix.length() > 100
+			? source.getName().substring(0, 100 - suffix.length()) : source.getName();
+		copy.setName(base + suffix);
+		copy.setType(source.getType());
+		copy.setSegmentId(source.getSegmentId());
+		copy.setTemplateId(source.getTemplateId());
+		copy.setCouponId(source.getCouponId());
+		copy.setTriggerType(source.getTriggerType());
+		copy.setStatus(CampaignStatus.DRAFT);
+		copy.setCreatedBy(memberId);
+		campaignMapper.insert(copy);
+		if (source.getType() == CampaignType.WORKFLOW) {
+			copySteps(campaignId, copy.getCampaignId());
+		}
+		return copy;
+	}
+
+	private void copySteps(long fromCampaignId, long toCampaignId) {
+		List<WorkflowStep> originals = workflowStepMapper.findByCampaignId(fromCampaignId);
+		if (originals.isEmpty()) {
+			return;
+		}
+		List<WorkflowStep> copies = originals.stream().map(o -> {
+			WorkflowStep step = new WorkflowStep();
+			step.setCampaignId(toCampaignId);
+			step.setNodeType(o.getNodeType());
+			step.setConfigJson(o.getConfigJson());
+			step.setDepth(o.getDepth());
+			return step;
+		}).toList();
+		workflowStepMapper.insertBatch(copies);
+		Map<Long, Long> newIdByOldId = new HashMap<>();
+		for (int i = 0; i < originals.size(); i++) {
+			newIdByOldId.put(originals.get(i).getStepId(), copies.get(i).getStepId());
+		}
+		for (int i = 0; i < originals.size(); i++) {
+			WorkflowStep o = originals.get(i);
+			workflowStepMapper.updateLinks(copies.get(i).getStepId(), newIdByOldId.get(o.getNextStepId()),
+				newIdByOldId.get(o.getYesStepId()), newIdByOldId.get(o.getNoStepId()));
+		}
+	}
+
+	private Campaign transition(long campaignId, CampaignStatus from, CampaignStatus to, String message) {
+		Campaign campaign = getOrThrow(campaignId);
+		if (campaignMapper.updateStatus(campaignId, from, to) == 0) {
+			throw new BusinessException(CampaignErrorCode.CAMPAIGN_INVALID_STATUS, message, null);
+		}
+		campaign.setStatus(to);
+		return campaign;
 	}
 
 	private Template requireTemplate(Long templateId) {

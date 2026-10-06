@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.withus.workflow.mapper.WorkflowInstanceMapper">
+
+	<!-- UPDATE ... RETURNING 은 select 로 선언해야 ResultSet 을 받는다 (발송 큐 claimBatch 와 같은 관용 패턴) -->
+	<!-- flushCache: 같은 SqlSession(@Transactional)에서 다시 부르면 1차 캐시가 첫 결과를 돌려줘 선점이 되지 않은 것처럼 보인다 -->
+	<select id="claimBatch" resultType="com.withus.workflow.domain.WorkflowInstance" flushCache="true">
+		UPDATE workflow_instance SET status = 'RUNNING', updated_at = now()
+		WHERE instance_id IN (
+			SELECT instance_id FROM workflow_instance wi
+			WHERE status = 'WAITING' AND next_run_at &lt;= now()
+			  AND EXISTS (
+			      SELECT 1 FROM campaign c
+			      WHERE c.campaign_id = wi.campaign_id AND c.status = 'ACTIVE'
+			  )
+			ORDER BY next_run_at
+			LIMIT 500
+			FOR UPDATE SKIP LOCKED
+		)
+		RETURNING *
+	</select>
+
+	<update id="moveToWaitPending">
+		UPDATE workflow_instance SET status = 'WAITING', current_step_id = #{nextStepId}, next_run_at = NULL,
+			retry_count = 0, last_error = NULL,
+			updated_at = now()
+		WHERE instance_id = #{instanceId} AND status = 'RUNNING'
+	</update>
+
+	<update id="moveToWait">
+		UPDATE workflow_instance SET status = 'WAITING', current_step_id = #{nextStepId}, next_run_at = #{nextRunAt},
+			retry_count = 0, last_error = NULL,
+			updated_at = now()
+		WHERE instance_id = #{instanceId} AND status = 'RUNNING'
+	</update>
+
+	<update id="complete">
+		UPDATE workflow_instance SET status = 'COMPLETED', updated_at = now(), retry_count = 0, last_error = NULL
+		WHERE instance_id = #{instanceId} AND status = 'RUNNING'
+	</update>
+
+	<update id="recordRetry">
+		UPDATE workflow_instance SET status = 'WAITING', retry_count = retry_count + 1, next_run_at = #{nextRunAt},
+			last_error = #{errorMessage}, updated_at = now()
+		WHERE instance_id = #{instanceId} AND status = 'RUNNING'
+	</update>
+
+	<update id="recordFailed">
+		UPDATE workflow_instance SET status = 'FAILED', last_error = #{errorMessage}, updated_at = now()
+		WHERE instance_id = #{instanceId} AND status = 'RUNNING'
+	</update>
+
+	<update id="recoverStuckRunning">
+		UPDATE workflow_instance SET status = 'WAITING', next_run_at = now()
+		WHERE status = 'RUNNING' AND updated_at &lt; now() - INTERVAL '10 minutes'
+	</update>
+
+	<select id="findById" resultType="com.withus.workflow.domain.WorkflowInstance">
+		SELECT * FROM workflow_instance WHERE instance_id = #{instanceId}
+	</select>
+
+	<update id="wake">
+		UPDATE workflow_instance SET next_run_at = #{nextRunAt}, updated_at = now()
+		WHERE instance_id = #{instanceId} AND status = 'WAITING' AND next_run_at IS NULL
+	</update>
+
+	<!-- DRAFT 캠페인의 구조를 다시 저장할 때: 시작이 도중에 실패해 남은 인스턴스는 옛 단계를 가리키므로(FK) 지운다. 발송 이력이 있는 인스턴스는 지우지 않는다 -->
+	<delete id="deleteUnstartedByCampaign">
+		DELETE FROM workflow_instance wi WHERE wi.campaign_id = #{campaignId}
+		  AND NOT EXISTS (SELECT 1 FROM send_log s WHERE s.instance_id = wi.instance_id)
+	</delete>
+
+	<update id="cancelActiveByCampaign">
+		UPDATE workflow_instance SET status = 'CANCELLED', updated_at = now()
+		WHERE campaign_id = #{campaignId} AND status IN ('WAITING', 'RUNNING')
+	</update>
+
+	<update id="cancelActiveByCustomer">
+		UPDATE workflow_instance SET status = 'CANCELLED', updated_at = now()
+		WHERE customer_id = #{customerId} AND status IN ('WAITING', 'RUNNING')
+	</update>
+
+	<sql id="byCampaign">
+		WHERE campaign_id = #{campaignId}
+		<if test="status != null">AND status = #{status}</if>
+	</sql>
+
+	<select id="findByCampaign" resultType="com.withus.workflow.domain.WorkflowInstance">
+		SELECT * FROM workflow_instance <include refid="byCampaign"/>
+		ORDER BY instance_id LIMIT #{limit} OFFSET #{offset}
+	</select>
+
+	<select id="countByCampaign" resultType="long">
+		SELECT count(*) FROM workflow_instance <include refid="byCampaign"/>
+	</select>
+
+	<insert id="insertBatch">
+		INSERT INTO workflow_instance (campaign_id, customer_id, current_step_id, status, next_run_at)
+		SELECT #{campaignId}, c.customer_id, #{stepId}, 'WAITING', now()
+		FROM customer c
+		WHERE c.customer_id IN
+		<foreach collection="customerIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+		  AND c.deleted_yn = 'N'
+		ON CONFLICT (campaign_id, customer_id) DO NOTHING
+	</insert>
+</mapper>

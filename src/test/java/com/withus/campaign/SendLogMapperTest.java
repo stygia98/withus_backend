@@ -3,6 +3,7 @@ package com.withus.campaign;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -326,7 +327,7 @@ class SendLogMapperTest {
 
 		List<SendLog> claimed = sendLogMapper.claimBatch();
 
-		assertThat(claimed).filteredOn(log -> log.getCampaignId() == draftCampaignId)
+		assertThat(claimed).filteredOn(log -> Objects.equals(log.getCampaignId(), draftCampaignId))
 			.extracting(SendLog::getCustomerId)
 			.as("PRD 8.4 테스트 발송만 예외 — CAMPAIGN 행은 막히고 TEST 행은 나간다 (공유 DB 의 다른 행은 보지 않는다)")
 			.containsOnly(testCustomerId);

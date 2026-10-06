@@ -26,6 +26,11 @@
 		<include refid="filter"/>
 	</select>
 
+	<select id="findActiveCustomerRegistered" resultType="com.withus.campaign.domain.Campaign">
+		SELECT <include refid="columns"/> FROM campaign
+		WHERE type = 'WORKFLOW' AND trigger_type = 'CUSTOMER_REGISTERED' AND status = 'ACTIVE'
+	</select>
+
 	<select id="findById" resultType="com.withus.campaign.domain.Campaign">
 		SELECT <include refid="columns"/> FROM campaign WHERE campaign_id = #{campaignId}
 	</select>
@@ -102,8 +107,24 @@
 		  )
 	</select>
 
+	<!-- 워크플로우(SEGMENT_SCHEDULED): 인스턴스가 있고 WAITING·RUNNING 이 하나도 없으면 완료(PRD 6.7). CUSTOMER_REGISTERED 는 계속 열려 있다 -->
+	<select id="findCompletableWorkflow" resultType="long">
+		SELECT campaign_id FROM campaign c
+		WHERE c.type = 'WORKFLOW' AND c.trigger_type = 'SEGMENT_SCHEDULED' AND c.status = 'ACTIVE'
+		  AND EXISTS (SELECT 1 FROM workflow_instance wi WHERE wi.campaign_id = c.campaign_id)
+		  AND NOT EXISTS (
+		      SELECT 1 FROM workflow_instance wi
+		      WHERE wi.campaign_id = c.campaign_id AND wi.status IN ('WAITING', 'RUNNING')
+		  )
+	</select>
+
 	<update id="complete">
 		UPDATE campaign SET status = 'COMPLETED', ended_at = now(), updated_at = now()
 		WHERE campaign_id = #{campaignId} AND status = 'ACTIVE'
+	</update>
+
+	<update id="completeManually">
+		UPDATE campaign SET status = 'COMPLETED', ended_at = now(), updated_at = now()
+		WHERE campaign_id = #{campaignId} AND status IN ('ACTIVE', 'PAUSED')
 	</update>
 </mapper>
