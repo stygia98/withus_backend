@@ -87,6 +87,25 @@ class CouponServiceIdempotencyTest {
 	}
 
 	@Test
+	void 같은_sendLogId에_다른_쿠폰으로_다시_호출해도_처음_발급분을_돌려준다() {
+		// 정상 흐름에는 없는 경로. 인자를 무시하고 처음 발급분을 돌려주는 것으로 확정 (project #12 PL 결정)
+		long otherCouponId = jdbc.queryForObject("""
+			INSERT INTO coupon (name, discount_type, discount_value, valid_from, valid_to)
+			VALUES ('멱등 테스트 다른 쿠폰', 'AMOUNT', 2000, CURRENT_DATE, CURRENT_DATE) RETURNING coupon_id
+			""", Long.class);
+		try {
+			long sendLogId = newSendLog();
+			UUID first = service.issue(couponId, customerId, sendLogId);
+
+			assertThat(service.issue(otherCouponId, customerId, sendLogId)).isEqualTo(first);
+			assertThat(jdbc.queryForObject("SELECT coupon_id FROM coupon_issue WHERE send_log_id = ?", Long.class,
+				sendLogId)).isEqualTo(couponId);
+		} finally {
+			jdbc.update("DELETE FROM coupon WHERE coupon_id = ?", otherCouponId);
+		}
+	}
+
+	@Test
 	void 같은_고객이라도_발송_건이_다르면_별도_발급이다() {
 		// 워크플로우에서 같은 고객에게 SEND 노드가 여러 번 나가는 경우: 발송 1건당 발급 1건
 		assertThat(service.issue(couponId, customerId, newSendLog()))
