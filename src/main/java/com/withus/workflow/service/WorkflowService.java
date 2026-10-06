@@ -143,19 +143,27 @@ public class WorkflowService {
 				templateUsesCouponUrl.put(id, usesCouponUrl(template));
 			}
 		}
-		if (!missingTemplates.isEmpty()) {
-			throw new BusinessException(WorkflowErrorCode.WORKFLOW_INVALID_STRUCTURE,
-				WorkflowErrorCode.WORKFLOW_INVALID_STRUCTURE.message(),
-				List.of("존재하지 않는 템플릿: " + missingTemplates));
-		}
-
 		Set<Long> couponIds = nodes.stream().map(WorkflowNode::couponId).filter(Objects::nonNull)
 			.collect(Collectors.toSet());
 		// 없는 쿠폰은 null 이라 false(쓸 수 없음)로 둔다 — 검증기가 "없거나 기간 밖"으로 보고한다
 		Map<Long, Boolean> couponValid = couponIds.stream()
 			.collect(Collectors.toMap(id -> id, id -> Boolean.TRUE.equals(sendLogMapper.isCouponValid(id))));
 
-		return workflowValidator.validate(nodes, templateUsesCouponUrl, couponValid);
+		return withTemplateExistsCheck(workflowValidator.validate(nodes, templateUsesCouponUrl, couponValid),
+			missingTemplates);
+	}
+
+	/**
+	 * 없는 템플릿을 예외가 아니라 검사 결과(TEMPLATE_EXISTS)로 보고한다 — POST /workflow/validate 도 "무엇이 틀렸는지"를 돌려줘야 한다
+	 * (PR #34 리뷰). 저장(PUT)은 valid 가 false 면 WORKFLOW_INVALID_STRUCTURE 로 막는다
+	 */
+	private WorkflowValidationResult withTemplateExistsCheck(WorkflowValidationResult result,
+			List<Long> missingTemplates) {
+		boolean exists = missingTemplates.isEmpty();
+		List<WorkflowCheck> checks = new java.util.ArrayList<>(result.checks());
+		checks.add(new WorkflowCheck("TEMPLATE_EXISTS", exists,
+			exists ? "SEND 노드의 템플릿이 전부 존재함" : "존재하지 않는 템플릿: " + missingTemplates));
+		return new WorkflowValidationResult(result.valid() && exists, checks, result.warnings());
 	}
 
 	private boolean usesCouponUrl(Template template) {
