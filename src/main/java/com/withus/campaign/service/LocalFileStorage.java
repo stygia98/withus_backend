@@ -6,8 +6,6 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.util.Locale;
-import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -19,8 +17,11 @@ import org.springframework.stereotype.Component;
 public class LocalFileStorage implements FileStorage {
 
 	private final Path root;
+	private final String publicBaseUrl;
 
-	public LocalFileStorage(@Value("${withus.storage.local-path}") String localPath) {
+	public LocalFileStorage(@Value("${withus.storage.local-path}") String localPath,
+		@Value("${withus.tracking.base-url}") String publicBaseUrl) {
+		this.publicBaseUrl = publicBaseUrl;
 		this.root = Path.of(localPath).toAbsolutePath().normalize();
 		try {
 			Files.createDirectories(root);
@@ -31,7 +32,7 @@ public class LocalFileStorage implements FileStorage {
 
 	@Override
 	public String store(String originalFilename, InputStream in, String contentType) {
-		String key = UUID.randomUUID() + extensionOf(originalFilename);
+		String key = FileStorage.newKey(originalFilename);
 		Path target = root.resolve(key).normalize();
 		if (!target.getParent().equals(root)) {
 			// UUID 로 새로 만든 이름이라 사실상 발생하지 않지만, 경로 조작에 대한 방어선을 하나 더 둔다
@@ -45,13 +46,8 @@ public class LocalFileStorage implements FileStorage {
 		return key;
 	}
 
-	/** 디렉터리 성분(../, /)은 getFileName() 으로 제거하고 확장자만 남긴다 */
-	private String extensionOf(String originalFilename) {
-		if (originalFilename == null || originalFilename.isBlank()) {
-			return "";
-		}
-		String name = Path.of(originalFilename).getFileName().toString();
-		int dot = name.lastIndexOf('.');
-		return dot < 0 ? "" : name.substring(dot).toLowerCase(Locale.ROOT);
+	@Override
+	public String publicUrl(String key) {
+		return publicBaseUrl + "/files/" + key;
 	}
 }

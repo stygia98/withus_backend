@@ -41,6 +41,8 @@ withus:
     phone: 02-000-0000
     unsubscribe-phone: 080-000-0000
     from-address: ${WITHUS_MAIL_FROM:hello@withus.local}   # 운영: SES에 인증한 이메일 주소
+  storage:
+    s3-bucket: ${S3_BUCKET:}   # type=s3(운영)일 때 이미지 버킷. 객체는 images/ 아래에만 둔다
   tracking:
     base-url: ${WITHUS_PUBLIC_BASE_URL:http://localhost:8080}   # 메일 링크 기준 주소. 운영: Amplify 주소
     bot-click-seconds: 10

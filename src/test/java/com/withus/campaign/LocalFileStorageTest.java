@@ -19,7 +19,7 @@ class LocalFileStorageTest {
 
 	@Test
 	void 저장하면_local_path_아래에_UUID_파일명으로_생긴다() {
-		LocalFileStorage storage = new LocalFileStorage(tempDir.toString());
+		LocalFileStorage storage = new LocalFileStorage(tempDir.toString(), "http://localhost:8080");
 
 		String key = storage.store("원본.jpg", new ByteArrayInputStream("데이터".getBytes()), "image/jpeg");
 
@@ -31,7 +31,7 @@ class LocalFileStorageTest {
 
 	@Test
 	void 원본_파일명에_경로_조작_문자가_있어도_local_path_밖에_저장되지_않는다() throws Exception {
-		LocalFileStorage storage = new LocalFileStorage(tempDir.toString());
+		LocalFileStorage storage = new LocalFileStorage(tempDir.toString(), "http://localhost:8080");
 
 		String key = storage.store("../../../../etc/passwd", new ByteArrayInputStream("x".getBytes()), "text/plain");
 
@@ -45,10 +45,17 @@ class LocalFileStorageTest {
 
 	@Test
 	void 확장자가_없는_원본_파일명도_저장된다() {
-		LocalFileStorage storage = new LocalFileStorage(tempDir.toString());
+		LocalFileStorage storage = new LocalFileStorage(tempDir.toString(), "http://localhost:8080");
 
 		String key = storage.store("확장자없음", new ByteArrayInputStream("x".getBytes()), "application/octet-stream");
 
 		assertThat(tempDir.resolve(key)).exists();
+	}
+
+	@Test
+	void 공개_URL은_기준_주소_아래_files_경로다() {
+		LocalFileStorage storage = new LocalFileStorage(tempDir.toString(), "http://localhost:8080");
+
+		assertThat(storage.publicUrl("abc.jpg")).isEqualTo("http://localhost:8080/files/abc.jpg");
 	}
 }
