@@ -10,7 +10,10 @@ import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -35,6 +38,9 @@ import com.withus.customer.service.ConsentService;
  * 같은 환경(로컬/PL Docker)에서 돌려 단계별 비율을 비교하면 어디가 환경에 민감한지 알 수 있다.
  *
  * 실제 커밋을 하므로 로컬 DB 에서만 실행한다(LoadQueueCheck 와 같은 가드).
+ *
+ * 꺼 두는 스케줄러는 send-dispatcher 하나뿐이다. 캠페인 예약·완료·복구 등 나머지 스케줄러는 계속 돌지만, 대상 캠페인을
+ * PAUSED 로 두고 측정하므로(claimBatch 와 자동 완료 모두 PAUSED 를 건드리지 않는다) 측정에 영향이 없다.
  */
 @DisabledIfEnvironmentVariable(named = "DB_URL", matches = "(?!.*//(localhost|127[.]0[.]0[.]1)[:/]).*",
 	disabledReason = "DB_URL 이 로컬 DB(localhost·127.0.0.1)가 아니면 실행하지 않는다")
@@ -48,6 +54,10 @@ class EnqueuePhaseCheck {
 	private static final int PING_COUNT = 200;
 
 	@Autowired
+	Environment environment;
+	@Value("${spring.datasource.url}")
+	String datasourceUrl;
+	@Autowired
 	JdbcTemplate jdbc;
 	@Autowired
 	SendLogMapper sendLogMapper;
@@ -58,8 +68,13 @@ class EnqueuePhaseCheck {
 
 	@Test
 	void 청크당_단계별_시간() {
-		Long campaignId = jdbc.queryForObject("SELECT campaign_id FROM campaign WHERE name = ?", Long.class, LOAD_CAMPAIGN);
-		assertThat(campaignId).as("먼저 load-data.sql 로 부하 데이터를 만드세요").isNotNull();
+		// 실제 커밋을 하므로, 환경변수 없이 -D 옵션 등으로 바뀐 경우를 한 번 더 막는다(LoadQueueCheck 와 같은 2차 방어선)
+		assertThat(environment.acceptsProfiles(Profiles.of("local"))).as("local 프로필에서만 실행한다").isTrue();
+		assertThat(datasourceUrl).as("로컬 DB(localhost·127.0.0.1)에서만 실행한다").containsAnyOf("//localhost", "//127.0.0.1");
+		// queryForObject 는 0건이면 EmptyResultDataAccessException 을 던져 아래 안내가 안 보이므로 목록으로 읽는다
+		List<Long> campaignIds = jdbc.queryForList("SELECT campaign_id FROM campaign WHERE name = ?", Long.class, LOAD_CAMPAIGN);
+		assertThat(campaignIds).as("먼저 load-data.sql 로 부하 데이터를 만드세요").isNotEmpty();
+		Long campaignId = campaignIds.get(0);
 		List<Long> customerIds = jdbc.queryForList(
 			"SELECT customer_id FROM customer WHERE email LIKE 'load-%@load.withus.local' ORDER BY customer_id", Long.class);
 		// 디스패처가 끼지 않도록 PAUSED, 이전 측정분은 지운다
