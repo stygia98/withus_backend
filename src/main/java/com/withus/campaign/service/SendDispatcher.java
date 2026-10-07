@@ -168,7 +168,7 @@ public class SendDispatcher {
 
 	/** 선점된 한 건을 트랜잭션 밖에서 처리하고 결과를 기록한다 */
 	public void processOne(SendLog sendLog) {
-		// NOTICE 는 campaign_id 가 없어 템플릿이 없다(F-12, 아직 적재 경로가 없는 미래 작업)
+		// NOTICE(F-12 수신동의 확인 안내)는 campaign_id 가 없어 템플릿이 없다 — MessageComposer 가 고정 문구로 렌더링한다(이슈 #81)
 		Template template = sendLog.getKind() == SendKind.NOTICE ? null : resolveTemplate(sendLog);
 		if (!recheck(sendLog, template)) {
 			return; // recheck 안에서 SKIPPED·PENDING 복귀·시간창 보류를 이미 기록했다
