@@ -13,6 +13,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.core.env.Environment;
+import org.springframework.dao.DataAccessException;
 import org.springframework.core.env.Profiles;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -89,6 +90,7 @@ class EnqueuePhaseCheck {
 		}
 		double pingMs = (System.nanoTime() - p0) / 1e6 / PING_COUNT;
 
+		double[] walBefore = settledWalStats();
 		TransactionTemplate tx = new TransactionTemplate(transactionManager);
 		int chunks = 0;
 		long recipientsNs = 0, consentNs = 0, insertNs = 0, commitNs = 0, buildNs = 0;
@@ -127,6 +129,7 @@ class EnqueuePhaseCheck {
 			chunks++;
 		}
 		double wallSec = (System.nanoTime() - wall0) / 1e9;
+		double[] walAfter = settledWalStats(); // wallSec 를 잰 뒤라 대기 시간이 총 시간에 섞이지 않는다
 
 		out("전제: 고객 %d명, 청크 %d개(500건), 왕복 기준선 SELECT 1 = %.2fms", customerIds.size(), chunks, pingMs);
 		out("총 %.1f초 (%.0f건/초), 적재 %d건", wallSec, inserted / wallSec, inserted);
@@ -134,12 +137,59 @@ class EnqueuePhaseCheck {
 			ms(recipientsNs, chunks), ms(consentNs, chunks), ms(insertNs, chunks), ms(commitNs, chunks), ms(buildNs, chunks));
 		out("비율: ① %.0f%% · ② %.0f%% · ③ %.0f%% · ④ %.0f%%", pct(recipientsNs, wallSec), pct(consentNs, wallSec),
 			pct(insertNs, wallSec), pct(commitNs, wallSec));
+		reportWal(walBefore, walAfter, wallSec);
 		// 서버 쪽 시간과 비교하려고 INSERT 한 번을 EXPLAIN ANALYZE 로도 남긴다(롤백)
 		jdbc.update("DELETE FROM send_log WHERE campaign_id = ?", campaignId); // 유니크 충돌을 피하려고 먼저 비운다
 		explainInsert(campaignId, customerIds.subList(0, Math.min(CHUNK, customerIds.size())));
 
 		jdbc.update("DELETE FROM send_log WHERE campaign_id = ?", campaignId);
 		assertThat(inserted).isEqualTo(customerIds.size());
+	}
+
+	/**
+	 * pg_stat_wal 누적값 {fsync 횟수, fsync 시간(ms), WAL 바이트, 레코드 수, 쓰기 횟수, 쓰기 시간(ms)}. 읽을 수 없으면 null.
+	 * PG17 까지는 wal_sync·wal_sync_time 컬럼이 있고, 그 뒤 버전은 pg_stat_io 로 옮겨졌을 수 있어 그때는 null 을 돌려준다.
+	 * 통계는 최대 약 1초 늦게 공유 메모리에 반영되므로 읽기 전에 잠시 기다린다(이슈 #73: 병목이 WAL fsync 였다).
+	 * 값은 DB 전체 누적이라 측정 중 다른 세션이 쓴 WAL 도 섞인다 — 조용한 DB 에서 잰다.
+	 */
+	private double[] settledWalStats() {
+		try {
+			Thread.sleep(1500);
+			return jdbc.queryForObject(
+				"SELECT wal_sync, wal_sync_time, wal_bytes, wal_records, wal_write, wal_write_time FROM pg_stat_wal",
+				(rs, i) -> new double[] { rs.getDouble(1), rs.getDouble(2), rs.getDouble(3), rs.getDouble(4),
+					rs.getDouble(5), rs.getDouble(6) });
+		} catch (DataAccessException e) {
+			return null;
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			return null;
+		}
+	}
+
+	private static void reportWal(double[] before, double[] after, double wallSec) {
+		if (before == null || after == null) {
+			out("WAL: pg_stat_wal 의 wal_sync·wal_sync_time 을 읽을 수 없다(PG18 이상은 pg_stat_io 의 object = 'wal' 을 본다)");
+			return;
+		}
+		double syncs = after[0] - before[0];
+		double syncSec = (after[1] - before[1]) / 1000.0;
+		double writes = after[4] - before[4];
+		double writeSec = (after[5] - before[5]) / 1000.0;
+		out("WAL: 생성 %.0fMB, 레코드 %.0f건, 쓰기 %.0f회, fsync %.0f회", (after[2] - before[2]) / (1024 * 1024),
+			after[3] - before[3], writes, syncs);
+		if (syncs == 0) {
+			// wal_sync 는 wal_sync_method 가 fdatasync·fsync 일 때만 센다(Linux 기본, RDS 도 해당).
+			// open_datasync 같은 방식(Windows 기본)은 쓰기와 동기화가 한 번에 일어나 wal_write_time 에 합쳐진다
+			out("WAL: fsync 가 0회 — wal_sync_method 가 fdatasync·fsync 가 아니면(예: Windows open_datasync) 동기 쓰기 시간이 쓰기 시간에 포함된다");
+		}
+		if ((syncs > 0 || writes > 0) && syncSec == 0 && writeSec == 0) {
+			out("WAL: 시간이 0 — track_wal_io_timing 이 꺼져 있으면 기록되지 않는다"
+				+ "(로컬: ALTER SYSTEM SET track_wal_io_timing = on; SELECT pg_reload_conf(); RDS: 파라미터 그룹에서 켠다)");
+			return;
+		}
+		out("WAL: fsync 시간 %.1f초 (총 시간의 %.0f%%), 회당 %.1fms / 쓰기 시간 %.1f초 (총 시간의 %.0f%%)", syncSec,
+			syncSec / wallSec * 100, syncs == 0 ? 0 : syncSec * 1000 / syncs, writeSec, writeSec / wallSec * 100);
 	}
 
 	/** 같은 형태의 500건 INSERT 를 서버에서 실제로 얼마에 실행하는지(플래닝·실행·트리거) — 클라이언트 측정과의 차이가 네트워크·드라이버 비용 */
