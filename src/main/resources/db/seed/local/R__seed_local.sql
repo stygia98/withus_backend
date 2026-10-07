@@ -1,6 +1,6 @@
 -- local 프로필 전용 시연 데이터 (DB_SCHEMA.md 9장). 운영 DB 에는 들어가지 않는다.
 -- 반복 실행 마이그레이션(R__): 내용이 바뀌면 다시 실행되므로 모든 INSERT 는 여러 번 실행해도 결과가 같다.
--- 고객 100명, 세그먼트 2개, 템플릿 3개(메일 2, SMS 1), 쿠폰 2개(정액·정률)
+-- 고객 100명, 세그먼트 2개, 템플릿 5개(광고 메일 2·SMS 1, 비광고 메일 1·SMS 1), 쿠폰 2개(정액·정률)
 
 -- 시드 작성자 계정: Flyway 가 OWNER 생성(앱 시작 후)보다 먼저 실행되므로 created_by 용으로 둔다.
 -- 비활성(active_yn = 'N')이고 BCrypt 가 아닌 비밀번호라 로그인할 수 없다.
@@ -52,17 +52,22 @@ FROM (VALUES
 JOIN segment s ON s.name = v.name
 ON CONFLICT (segment_id) DO NOTHING;
 
--- 템플릿 3개 (메일 2, SMS 1). (광고)·발신자·수신거부 문구는 발송 시 시스템이 넣으므로 본문에 쓰지 않는다
+-- 템플릿 5개: 광고 3개(메일 2, SMS 1) + 비광고 2개(메일 1, SMS 1).
+-- (광고)·발신자·수신거부 문구는 광고 템플릿(ad_yn = 'Y')에만 발송 시 시스템이 넣으므로 본문에 쓰지 않는다
 INSERT INTO template (channel, name, subject, body, ad_yn, created_by)
-SELECT v.channel, v.name, v.subject, v.body, 'Y', m.member_id
+SELECT v.channel, v.name, v.subject, v.body, v.ad_yn, m.member_id
 FROM (VALUES
         ('EMAIL', '환영 메일', '{{name|고객}}님, 위드어스에 오신 것을 환영합니다',
-         '<p>안녕하세요, {{name|고객}}님!</p><p>위드어스 회원이 되신 것을 환영합니다.</p><p><a href="https://example.com/new">신상품 보러 가기</a></p>'),
+         '<p>안녕하세요, {{name|고객}}님!</p><p>위드어스 회원이 되신 것을 환영합니다.</p><p><a href="https://example.com/new">신상품 보러 가기</a></p>', 'Y'),
         ('EMAIL', '쿠폰 안내 메일', '{{name|고객}}님께 드리는 할인 쿠폰',
-         '<p>{{name|고객}}님, 감사의 마음을 담아 쿠폰을 드립니다.</p><p><a href="{{couponUrl}}">쿠폰 받기</a></p><p><a href="https://example.com/sale">할인 상품 보기</a></p>'),
+         '<p>{{name|고객}}님, 감사의 마음을 담아 쿠폰을 드립니다.</p><p><a href="{{couponUrl}}">쿠폰 받기</a></p><p><a href="https://example.com/sale">할인 상품 보기</a></p>', 'Y'),
         ('SMS', 'SMS 리마인드', NULL,
-         '{{name|고객}}님, 장바구니에 담아 두신 상품이 기다리고 있어요.')
-     ) AS v(channel, name, subject, body)
+         '{{name|고객}}님, 장바구니에 담아 두신 상품이 기다리고 있어요.', 'Y'),
+        ('EMAIL', '이용 약관 변경 안내', '[위드어스] 이용 약관 변경 안내',
+         '<p>안녕하세요, {{name|고객}}님.</p><p>서비스 이용 약관이 변경되어 안내드립니다.</p><p><a href="https://example.com/terms">변경된 약관 보기</a></p>', 'N'),
+        ('SMS', '배송 안내 SMS', NULL,
+         '{{name|고객}}님, 주문하신 상품이 발송되었습니다.', 'N')
+     ) AS v(channel, name, subject, body, ad_yn)
 JOIN member m ON m.email = 'seed@withus.local'
 WHERE NOT EXISTS (SELECT 1 FROM template t WHERE t.name = v.name);
 
