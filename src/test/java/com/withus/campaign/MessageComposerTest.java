@@ -23,11 +23,13 @@ import com.withus.campaign.domain.SendLog;
 import com.withus.campaign.domain.Template;
 import com.withus.campaign.mapper.SendLogMapper;
 import com.withus.campaign.service.AdCopyInserter;
+import com.withus.campaign.service.ConsentNoticeCopy;
 import com.withus.campaign.service.MessageComposer;
 import com.withus.campaign.service.messaging.OutboundMessage;
 import com.withus.common.domain.Channel;
 import com.withus.common.render.DefaultPlaceholderRenderer;
 import com.withus.coupon.service.CouponService;
+import com.withus.customer.service.ConsentService;
 import com.withus.tracking.service.TrackingLinkService;
 
 /**
@@ -54,7 +56,7 @@ class MessageComposerTest {
 
 		messageComposer = new MessageComposer(sendLogMapper, couponService, new DefaultPlaceholderRenderer(),
 			new AdCopyInserter("위드어스", "02-000-0000", "080-000-0000"), trackingLinkService,
-			"https://withus.local");
+			mock(ConsentService.class), new ConsentNoticeCopy("위드어스", "080-000-0000"), "https://withus.local");
 	}
 
 	private static CustomerPlaceholderSource source(String name) {
