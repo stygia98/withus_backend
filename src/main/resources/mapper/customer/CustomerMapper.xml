@@ -142,6 +142,21 @@
 		<include refid="sendable"/>
 	</select>
 
+	<!-- F-12 NOTICE 본문의 동의 날짜 (#81). 삭제 고객·동의 N 이면 행 없음 -->
+	<select id="findConsentAt" resultType="java.time.OffsetDateTime">
+		SELECT
+		<choose>
+			<when test="channel == @com.withus.common.domain.Channel@EMAIL">c.email_consent_at</when>
+			<otherwise>c.sms_consent_at</otherwise>
+		</choose>
+		FROM customer c
+		WHERE c.customer_id = #{customerId} AND c.deleted_yn = 'N'
+		<choose>
+			<when test="channel == @com.withus.common.domain.Channel@EMAIL">AND c.email_consent_yn = 'Y'</when>
+			<otherwise>AND c.sms_consent_yn = 'Y'</otherwise>
+		</choose>
+	</select>
+
 	<!-- 발송 가능 판정 (PRD 8.2): 삭제 N + 채널 동의 Y + suppression 미포함 (SMS 는 휴대폰 필수) -->
 	<sql id="sendable">
 		AND c.deleted_yn = 'N'
