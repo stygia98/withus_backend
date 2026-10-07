@@ -31,7 +31,19 @@
 		<jjwt.version>0.13.0</jjwt.version>
 		<poi.version>5.5.1</poi.version>
 		<commons-csv.version>1.14.1</commons-csv.version>
+		<awssdk.version>2.55.12</awssdk.version>
 	</properties>
+	<dependencyManagement>
+		<dependencies>
+			<dependency>
+				<groupId>software.amazon.awssdk</groupId>
+				<artifactId>bom</artifactId>
+				<version>${awssdk.version}</version>
+				<type>pom</type>
+				<scope>import</scope>
+			</dependency>
+		</dependencies>
+	</dependencyManagement>
 	<dependencies>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
@@ -93,6 +105,11 @@
 			<groupId>org.apache.commons</groupId>
 			<artifactId>commons-csv</artifactId>
 			<version>${commons-csv.version}</version>
+		</dependency>
+		<!-- SES 발송 (PL 승인 #78: AWS SDK v2 sesv2, 자격증명은 DefaultCredentialsProvider) -->
+		<dependency>
+			<groupId>software.amazon.awssdk</groupId>
+			<artifactId>sesv2</artifactId>
 		</dependency>
 		<dependency>
 			<groupId>org.springdoc</groupId>
