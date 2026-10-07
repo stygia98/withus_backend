@@ -9,9 +9,12 @@ import java.util.Map;
 import java.util.function.BooleanSupplier;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import com.withus.campaign.domain.SendKind;
@@ -22,17 +25,28 @@ import com.withus.common.domain.Channel;
  * 부하 2/3 — 발송 큐 10만 건이 쌓인 상태의 우선순위·스케줄러 동시 실행·적재 시간·메모리 측정 (PRD 10.3 부하 항목).
  * 일반 테스트 묶음에 넣지 않으려고 이름을 *Check 로 둔다. 시간은 단언하지 않고 출력만 한다(우선순위 역전 건수만 단언).
  *
- * 준비: 로컬 DB 에 load-data.sql 로 10만 건을 먼저 만들고(src/test/resources/load/), 1025 포트에 SMTP 수신기(Mailpit)를 띄운다.
- * 실행: ./mvnw test -Dtest=LoadQueueCheck -Dses.max-send-rate=14
+ * 준비: 로컬 DB 에 load-data.sql 로 10만 건을 먼저 만들고(src/test/resources/load/), SMTP 수신기를 띄운다.
+ *       Mailpit(1025)을 그대로 쓰면 수천 통이 쌓이므로, 버리는 수신기를 다른 포트로 띄우고 -Dspring.mail.port 로 돌리는 편이 낫다.
+ * 실행: ./mvnw test -Dtest=LoadQueueCheck -Dses.max-send-rate=14 [-Dspring.mail.port=1026]
  * 끝나고 load-clean.sql 로 정리한다. 이 클래스가 만드는 캠페인도 이름이 [LOAD] 로 시작해 함께 지워진다.
  *
- * 실제 커밋·실제 스케줄러(@Scheduled 8종)를 쓰므로 롤백 트랜잭션이 아니다.
+ * 실제 커밋·실제 스케줄러(@Scheduled 8종)를 쓰므로 롤백 트랜잭션이 아니다. local 이 아닌 DB 에서 돌리면 실제 발송이
+ * 시작될 수 있다(PR #71 리뷰). 스케줄러는 Spring 컨텍스트가 뜨는 순간 돌기 시작하므로, 메서드 안의 단언만으로는 늦다 —
+ * 아래 JUnit 조건이 컨텍스트를 만들기 전에 환경변수로 막고(건너뜀), 메서드 안의 단언은 -D 옵션 등으로 바뀐 경우를 한 번 더 막는다.
  */
+@DisabledIfEnvironmentVariable(named = "DB_URL", matches = "(?!.*//(localhost|127[.]0[.]0[.]1)[:/]).*",
+	disabledReason = "DB_URL 이 로컬 DB(localhost·127.0.0.1)가 아니면 실행하지 않는다 — 실제 스케줄러가 돈다")
+@DisabledIfEnvironmentVariable(named = "SPRING_PROFILES_ACTIVE", matches = "(?!.*local).+",
+	disabledReason = "SPRING_PROFILES_ACTIVE 가 local 이 아니면 실행하지 않는다")
 @SpringBootTest
 class LoadQueueCheck {
 
 	private static final String LOAD_CAMPAIGN = "[LOAD] 부하 캠페인";
 
+	@Autowired
+	Environment environment;
+	@Value("${spring.datasource.url}")
+	String datasourceUrl;
 	@Autowired
 	JdbcTemplate jdbc;
 	@Autowired
@@ -45,6 +59,9 @@ class LoadQueueCheck {
 
 	@Test
 	void 대기_십만건_상태의_적재_우선순위_스케줄러() throws Exception {
+		// 실제 스케줄러가 돌고 캠페인을 ACTIVE 로 바꾸므로, 운영·공용 DB 에서는 절대 실행하지 않는다
+		assertThat(environment.acceptsProfiles(Profiles.of("local"))).as("local 프로필에서만 실행한다").isTrue();
+		assertThat(datasourceUrl).as("로컬 DB(localhost·127.0.0.1)에서만 실행한다").containsAnyOf("//localhost", "//127.0.0.1");
 		Long campaignId = jdbc.queryForObject("SELECT campaign_id FROM campaign WHERE name = ?", Long.class, LOAD_CAMPAIGN);
 		assertThat(campaignId).as("먼저 load-data.sql 로 부하 데이터를 만드세요").isNotNull();
 		List<Long> customerIds = jdbc.queryForList(
