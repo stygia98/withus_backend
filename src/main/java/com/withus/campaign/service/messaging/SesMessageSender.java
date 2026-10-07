@@ -6,6 +6,8 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.Properties;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
@@ -23,7 +25,9 @@ import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.core.SdkBytes;
 import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
 import software.amazon.awssdk.core.exception.SdkClientException;
+import software.amazon.awssdk.retries.DefaultRetryStrategy;
 import software.amazon.awssdk.services.sesv2.SesV2Client;
+import software.amazon.awssdk.services.sesv2.SesV2ClientBuilder;
 import software.amazon.awssdk.services.sesv2.model.EmailContent;
 import software.amazon.awssdk.services.sesv2.model.LimitExceededException;
 import software.amazon.awssdk.services.sesv2.model.RawMessage;
@@ -41,6 +45,8 @@ import software.amazon.awssdk.services.sesv2.model.TooManyRequestsException;
 @Component
 @ConditionalOnProperty(prefix = "withus.mail", name = "type", havingValue = "ses")
 public class SesMessageSender implements MessageSender {
+
+	private static final Logger log = LoggerFactory.getLogger(SesMessageSender.class);
 
 	private final SesV2Client ses;
 	private final String fromAddress;
@@ -76,6 +82,7 @@ public class SesMessageSender implements MessageSender {
 		} catch (SdkClientException e) {
 			return SendResult.failure(ErrorType.TRANSIENT, e.getMessage()); // 연결 실패·타임아웃
 		} catch (RuntimeException e) {
+			log.warn("SES 발송 중 예상하지 못한 예외 — 일시 오류로 처리: {}", e.getClass().getName(), e);
 			return SendResult.failure(ErrorType.TRANSIENT, e.getMessage());
 		}
 	}
@@ -95,19 +102,29 @@ public class SesMessageSender implements MessageSender {
 		return out.toByteArray();
 	}
 
-	/** 자격증명은 DefaultCredentialsProvider(EC2 IAM 역할 우선), 리전은 AWS_REGION. 키는 코드·설정에 두지 않는다 */
+	/**
+	 * 자격증명은 DefaultCredentialsProvider(EC2 IAM 역할 우선), 리전은 AWS_REGION. 키는 코드·설정에 두지 않는다.
+	 * 빈과 테스트(가짜 서버에 endpointOverride)가 같은 설정을 쓰도록 빌더를 돌려준다
+	 */
+	public static SesV2ClientBuilder clientBuilder() {
+		return SesV2Client.builder()
+			.credentialsProvider(DefaultCredentialsProvider.builder().build())
+			.overrideConfiguration(ClientOverrideConfiguration.builder()
+				// 응답이 10분 넘게 지연되면 멈춤 복구(UNKNOWN_RESULT)와 겹친다 — 그 안에 끊는다
+				.apiCallTimeout(Duration.ofSeconds(60))
+				// 재시도는 발송 큐(1·5·15분)가 한다. SendEmail 에는 멱등 키가 없어 SDK 자체 재시도는 같은 메일을 또 보내고,
+				// 요청 제한(429)에서도 백오프 없이 max-send-rate 를 우회한다 (PL 리뷰 #85)
+				.retryStrategy(DefaultRetryStrategy.doNotRetry())
+				.build());
+	}
+
 	@Configuration
 	@ConditionalOnProperty(prefix = "withus.mail", name = "type", havingValue = "ses")
 	static class SesClientConfig {
 
 		@Bean(destroyMethod = "close")
 		SesV2Client sesV2Client() {
-			return SesV2Client.builder()
-				.credentialsProvider(DefaultCredentialsProvider.builder().build())
-				// 응답이 10분 넘게 지연되면 멈춤 복구(UNKNOWN_RESULT)와 겹친다 — 그 안에 끊는다
-				.overrideConfiguration(ClientOverrideConfiguration.builder()
-					.apiCallTimeout(Duration.ofSeconds(60)).build())
-				.build();
+			return clientBuilder().build();
 		}
 	}
 }
