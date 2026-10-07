@@ -15,7 +15,10 @@
 --  2-1. [시연] 9월 정기 소식        ONE_TIME COMPLETED, 25일 전 11:00 발송, 메일 동의 고객 전체, 오픈 약 50%, 클릭 약 15%
 --     - 기본 7일 KPI 에는 없고 기간 필터 '최근 30일'·'전체'에서 보인다. AI-02 는 최근 90일 사람 이벤트 100건 이상이어야 시간대 추천을 하므로 그 몫을 채운다
 --  3. [시연] 신규 고객 환영 여정    WORKFLOW ACTIVE (CUSTOMER_REGISTERED)
---     - TRIGGER → 환영 메일 → 2일 대기 → 클릭했나? → 예: 쿠폰 안내 메일(10% 쿠폰) / 아니오: SMS 리마인드 → END
+--     - PRD 6.4 예시 구조(노드 11개, CONDITION 중첩 2단계):
+--       TRIGGER → 환영 메일 → 2일 대기 → 클릭했나?
+--         예  → 누적구매 10만 원 이상? → 예: 쿠폰 안내 메일(VIP, 10% 쿠폰) / 아니오: 쿠폰 안내 메일(일반, 5,000원 쿠폰) → END
+--         아니오 → SMS 리마인드 → END
 --     - 고객을 3그룹으로 나눠 6일 전·4일 전 시작(분기까지 완료), 1일 전 시작(대기 중, WAITING)
 --     - SMS 수신거부 고객의 SMS 단계는 SKIPPED(발송 직전 재확인 실패) — 시도 수에서 빠진다
 --
@@ -45,7 +48,8 @@ DECLARE
     v_camp_welcome  BIGINT;
     v_camp_flow     BIGINT;
     v_camp_news     BIGINT;
-    s_trigger BIGINT; s_send1 BIGINT; s_wait BIGINT; s_cond BIGINT; s_yes BIGINT; s_no BIGINT; s_end BIGINT;
+    s_trigger BIGINT; s_send1 BIGINT; s_wait BIGINT; s_cond BIGINT; s_cond2 BIGINT;
+    s_vip BIGINT; s_normal BIGINT; s_sms BIGINT; s_end_vip BIGINT; s_end_normal BIGINT; s_end_sms BIGINT;
     v_today TIMESTAMPTZ := date_trunc('day', now());
 BEGIN
     IF EXISTS (SELECT 1 FROM campaign WHERE name = '[시연] 가을 감사 쿠폰 발송') THEN
@@ -150,20 +154,32 @@ BEGIN
         VALUES (v_camp_flow, 'SEND_EMAIL', jsonb_build_object('templateId', v_tpl_welcome), 0) RETURNING step_id INTO s_send1;
         INSERT INTO workflow_step (campaign_id, node_type, config_json, depth)
         VALUES (v_camp_flow, 'WAIT', '{"amount":2,"unit":"DAY"}', 0) RETURNING step_id INTO s_wait;
+        -- depth = 그 노드까지 지나온 CONDITION 수 (WorkflowService.assignDepth 와 같은 규칙)
         INSERT INTO workflow_step (campaign_id, node_type, config_json, depth)
         VALUES (v_camp_flow, 'CONDITION', '{"condition":"EMAIL_CLICKED"}', 0) RETURNING step_id INTO s_cond;
         INSERT INTO workflow_step (campaign_id, node_type, config_json, depth)
-        VALUES (v_camp_flow, 'SEND_EMAIL', jsonb_build_object('templateId', v_tpl_coupon, 'couponId', v_coupon_rate), 1) RETURNING step_id INTO s_yes;
+        VALUES (v_camp_flow, 'CONDITION', '{"condition":"PURCHASE_GTE","amount":100000}', 1) RETURNING step_id INTO s_cond2;
         INSERT INTO workflow_step (campaign_id, node_type, config_json, depth)
-        VALUES (v_camp_flow, 'SEND_SMS', jsonb_build_object('templateId', v_tpl_sms), 1) RETURNING step_id INTO s_no;
+        VALUES (v_camp_flow, 'SEND_EMAIL', jsonb_build_object('templateId', v_tpl_coupon, 'couponId', v_coupon_rate), 2) RETURNING step_id INTO s_vip;
         INSERT INTO workflow_step (campaign_id, node_type, config_json, depth)
-        VALUES (v_camp_flow, 'END', '{}', 0) RETURNING step_id INTO s_end;
+        VALUES (v_camp_flow, 'SEND_EMAIL', jsonb_build_object('templateId', v_tpl_coupon, 'couponId', v_coupon_amount), 2) RETURNING step_id INTO s_normal;
+        INSERT INTO workflow_step (campaign_id, node_type, config_json, depth)
+        VALUES (v_camp_flow, 'SEND_SMS', jsonb_build_object('templateId', v_tpl_sms), 1) RETURNING step_id INTO s_sms;
+        INSERT INTO workflow_step (campaign_id, node_type, config_json, depth)
+        VALUES (v_camp_flow, 'END', '{}', 2) RETURNING step_id INTO s_end_vip;
+        INSERT INTO workflow_step (campaign_id, node_type, config_json, depth)
+        VALUES (v_camp_flow, 'END', '{}', 2) RETURNING step_id INTO s_end_normal;
+        INSERT INTO workflow_step (campaign_id, node_type, config_json, depth)
+        VALUES (v_camp_flow, 'END', '{}', 1) RETURNING step_id INTO s_end_sms;
 
         UPDATE workflow_step SET next_step_id = s_send1 WHERE step_id = s_trigger;
         UPDATE workflow_step SET next_step_id = s_wait  WHERE step_id = s_send1;
         UPDATE workflow_step SET next_step_id = s_cond  WHERE step_id = s_wait;
-        UPDATE workflow_step SET yes_step_id = s_yes, no_step_id = s_no WHERE step_id = s_cond;
-        UPDATE workflow_step SET next_step_id = s_end   WHERE step_id IN (s_yes, s_no);
+        UPDATE workflow_step SET yes_step_id = s_cond2, no_step_id = s_sms WHERE step_id = s_cond;
+        UPDATE workflow_step SET yes_step_id = s_vip, no_step_id = s_normal WHERE step_id = s_cond2;
+        UPDATE workflow_step SET next_step_id = s_end_vip    WHERE step_id = s_vip;
+        UPDATE workflow_step SET next_step_id = s_end_normal WHERE step_id = s_normal;
+        UPDATE workflow_step SET next_step_id = s_end_sms    WHERE step_id = s_sms;
 
         -- 대상: 최근 90일 가입 + 메일 동의. 그룹(고객 id % 3): 0 = 6일 전 시작, 1 = 4일 전 시작, 2 = 1일 전 시작(대기 중)
         CREATE TEMP TABLE demo_flow ON COMMIT DROP AS
@@ -171,13 +187,16 @@ BEGIN
                v_today - make_interval(days => CAST(CASE c.customer_id % 3 WHEN 0 THEN 6 WHEN 1 THEN 4 ELSE 1 END AS int))
                        + interval '9 hours' + make_interval(mins => CAST((c.customer_id % 50) AS int)) AS send1_at,
                c.customer_id % 3 = 2 AS waiting,
-               (c.customer_id * 41) % 100 < 30 AS clicked
+               (c.customer_id * 41) % 100 < 30 AS clicked,
+               c.total_purchase >= 100000 AS vip
         FROM customer c
         WHERE c.deleted_yn = 'N' AND c.email_consent_yn = 'Y' AND c.joined_at >= CURRENT_DATE - 90;
 
         INSERT INTO workflow_instance (campaign_id, customer_id, current_step_id, status, next_run_at, created_at, updated_at)
         SELECT v_camp_flow, f.customer_id,
-               CASE WHEN f.waiting THEN s_cond ELSE s_end END,
+               CASE WHEN f.waiting THEN s_cond
+                    WHEN NOT f.clicked THEN s_end_sms
+                    WHEN f.vip THEN s_end_vip ELSE s_end_normal END,
                CASE WHEN f.waiting THEN 'WAITING' ELSE 'COMPLETED' END,
                CASE WHEN f.waiting THEN f.send1_at + interval '2 days' END,
                f.send1_at - interval '1 minute',
@@ -190,10 +209,10 @@ BEGIN
                f.send1_at, f.send1_at - interval '30 seconds', f.send1_at
         FROM demo_flow f JOIN workflow_instance i ON i.campaign_id = v_camp_flow AND i.customer_id = f.customer_id;
 
-        -- 분기 (2일 뒤): 클릭 → 쿠폰 메일, 미클릭 → SMS (SMS 수신거부면 SKIPPED)
+        -- 분기 (2일 뒤): 클릭 + 구매 10만 원 이상 → VIP 쿠폰 메일, 클릭 + 미만 → 일반 쿠폰 메일, 미클릭 → SMS (SMS 수신거부면 SKIPPED)
         INSERT INTO send_log (campaign_id, instance_id, step_id, customer_id, recipient, channel, status, kind, priority, attempt_count, error_message, sent_at, created_at, updated_at)
         SELECT v_camp_flow, i.instance_id,
-               CASE WHEN f.clicked THEN s_yes ELSE s_no END,
+               CASE WHEN NOT f.clicked THEN s_sms WHEN f.vip THEN s_vip ELSE s_normal END,
                f.customer_id,
                CASE WHEN f.clicked THEN f.email ELSE f.phone END,
                CASE WHEN f.clicked THEN 'EMAIL' ELSE 'SMS' END,
@@ -207,10 +226,12 @@ BEGIN
         FROM demo_flow f JOIN workflow_instance i ON i.campaign_id = v_camp_flow AND i.customer_id = f.customer_id
         WHERE NOT f.waiting;
 
+        -- SEND 노드마다 연결된 쿠폰이 다르다: VIP 경로는 10% 쿠폰, 일반 경로는 5,000원 쿠폰
         INSERT INTO coupon_issue (coupon_id, customer_id, send_log_id, issued_at, used_at)
-        SELECT v_coupon_rate, s.customer_id, s.send_log_id, s.sent_at,
+        SELECT CASE WHEN s.step_id = s_vip THEN v_coupon_rate ELSE v_coupon_amount END,
+               s.customer_id, s.send_log_id, s.sent_at,
                CASE WHEN (s.customer_id * 13) % 100 < 40 THEN s.sent_at + interval '5 hours' END
-        FROM send_log s WHERE s.campaign_id = v_camp_flow AND s.step_id = s_yes AND s.status = 'SENT';
+        FROM send_log s WHERE s.campaign_id = v_camp_flow AND s.step_id IN (s_vip, s_normal) AND s.status = 'SENT';
 
         -- 환영 메일 클릭 이벤트 — CONDITION 판정 근거 (clicked 고객은 반드시 사람 클릭이 있다)
         INSERT INTO demo_ev (send_log_id, event_type, link_id, user_agent, ip_hash, bot_yn, occurred_at)
@@ -224,7 +245,7 @@ BEGIN
         WHERE s.campaign_id = v_camp_flow AND s.step_id = s_send1
           AND (f.clicked OR (t.event_type = 'OPEN' AND (s.customer_id * 7) % 100 < 50));
 
-        -- 쿠폰 메일(분기 예) 오픈·클릭
+        -- 쿠폰 메일(분기 예: VIP·일반 둘 다) 오픈·클릭
         INSERT INTO demo_ev (send_log_id, event_type, link_id, user_agent, ip_hash, bot_yn, occurred_at)
         SELECT s.send_log_id, t.event_type, CASE WHEN t.event_type = 'CLICK' THEN v_link_sale END,
                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0 Safari/537.36',
@@ -232,7 +253,7 @@ BEGIN
                LEAST(s.sent_at + make_interval(hours => CAST(1 + (s.customer_id % 6) AS int), mins => CAST(t.ord AS int)), now() - interval '5 minutes')
         FROM send_log s
         CROSS JOIN (VALUES ('OPEN', 0), ('CLICK', 3)) AS t(event_type, ord)
-        WHERE s.campaign_id = v_camp_flow AND s.step_id = s_yes AND s.status = 'SENT'
+        WHERE s.campaign_id = v_camp_flow AND s.step_id IN (s_vip, s_normal) AND s.status = 'SENT'
           AND (t.event_type = 'OPEN' OR (s.customer_id * 11) % 100 < 60);
     END IF;
 
