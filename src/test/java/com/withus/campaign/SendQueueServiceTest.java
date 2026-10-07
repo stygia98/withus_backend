@@ -136,6 +136,10 @@ class SendQueueServiceTest {
 			"SELECT status FROM send_log WHERE campaign_id = ? AND customer_id = ?", String.class, campaignId,
 			customerId);
 		assertThat(status).isEqualTo("SKIPPED");
+		String reason = jdbcTemplate.queryForObject(
+			"SELECT error_message FROM send_log WHERE campaign_id = ? AND customer_id = ?", String.class,
+			campaignId, customerId);
+		assertThat(reason).isEqualTo("NOT_SENDABLE");
 	}
 
 	@Test

@@ -46,11 +46,11 @@
 	</select>
 
 	<insert id="insertOneTimeBatch">
-		INSERT INTO send_log (campaign_id, instance_id, step_id, customer_id, recipient, channel, status, kind, priority)
+		INSERT INTO send_log (campaign_id, instance_id, step_id, customer_id, recipient, channel, status, kind, priority, error_message)
 		VALUES
 		<foreach collection="logs" item="item" separator=",">
 			(#{item.campaignId}, #{item.instanceId}, #{item.stepId}, #{item.customerId}, #{item.recipient},
-			 #{item.channel}, #{item.status}, #{item.kind}, #{item.priority})
+			 #{item.channel}, #{item.status}, #{item.kind}, #{item.priority}, #{item.errorMessage})
 		</foreach>
 		ON CONFLICT (campaign_id, customer_id) WHERE instance_id IS NULL DO NOTHING
 	</insert>
@@ -62,11 +62,11 @@
 	</insert>
 
 	<insert id="insertWorkflowBatch">
-		INSERT INTO send_log (campaign_id, instance_id, step_id, customer_id, recipient, channel, status, kind, priority)
+		INSERT INTO send_log (campaign_id, instance_id, step_id, customer_id, recipient, channel, status, kind, priority, error_message)
 		VALUES
 		<foreach collection="logs" item="item" separator=",">
 			(#{item.campaignId}, #{item.instanceId}, #{item.stepId}, #{item.customerId}, #{item.recipient},
-			 #{item.channel}, #{item.status}, #{item.kind}, #{item.priority})
+			 #{item.channel}, #{item.status}, #{item.kind}, #{item.priority}, #{item.errorMessage})
 		</foreach>
 		ON CONFLICT ON CONSTRAINT uq_send_log_step DO NOTHING
 	</insert>
