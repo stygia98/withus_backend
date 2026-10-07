@@ -1,8 +1,10 @@
 package com.withus.customer.service;
 
+import java.time.OffsetDateTime;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 
 import org.springframework.stereotype.Service;
@@ -36,5 +38,11 @@ public class ConsentServiceImpl implements ConsentService {
 			return Set.of();
 		}
 		return new HashSet<>(customerMapper.filterSendable(customerIds, channel));
+	}
+
+	@Override
+	@Transactional(readOnly = true)
+	public Optional<OffsetDateTime> findConsentAt(long customerId, Channel channel) {
+		return Optional.ofNullable(customerMapper.findConsentAt(customerId, Objects.requireNonNull(channel, "channel")));
 	}
 }

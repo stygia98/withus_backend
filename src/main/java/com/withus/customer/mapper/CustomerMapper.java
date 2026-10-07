@@ -1,5 +1,6 @@
 package com.withus.customer.mapper;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 
 import org.apache.ibatis.annotations.Mapper;
@@ -68,6 +69,9 @@ public interface CustomerMapper {
 
 	/** isSendable 과 같은 조건으로 발송 가능한 고객 ID만 */
 	List<Long> filterSendable(@Param("customerIds") List<Long> customerIds, @Param("channel") Channel channel);
+
+	/** 삭제되지 않았고 채널 동의 Y 인 고객의 그 채널 동의 일시. 아니면 null */
+	OffsetDateTime findConsentAt(@Param("customerId") long customerId, @Param("channel") Channel channel);
 
 	/** 휴면 조건에 맞는 고객을 휴면으로. 바뀐 건수 */
 	int markDormant();

@@ -2,6 +2,8 @@ package com.withus.customer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.time.OffsetDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 
@@ -82,6 +84,28 @@ class ConsentServiceTest {
 		assertThat(consentService.filterSendable(ids, Channel.EMAIL)).containsExactlyInAnyOrder(ok, noPhone);
 		assertThat(consentService.filterSendable(ids, Channel.SMS)).containsExactlyInAnyOrder(ok, suppressed);
 		assertThat(consentService.filterSendable(List.of(), Channel.EMAIL)).isEmpty();
+	}
+
+	@Test
+	void 동의_일시는_채널별로_돌려주고_동의_N_삭제_없는_고객은_비어_있다_F12_NOTICE() {
+		long id = customer("Y", "Y", "N", "N");
+		OffsetDateTime emailAt = OffsetDateTime.now().minusYears(2).truncatedTo(ChronoUnit.SECONDS);
+		OffsetDateTime smsAt = OffsetDateTime.now().minusDays(3).truncatedTo(ChronoUnit.SECONDS);
+		jdbc.update("UPDATE customer SET email_consent_at = ?, sms_consent_at = ? WHERE customer_id = ?",
+			emailAt, smsAt, id);
+
+		assertThat(consentService.findConsentAt(id, Channel.EMAIL)).hasValueSatisfying(
+			at -> assertThat(at).isAtSameInstantAs(emailAt));
+		assertThat(consentService.findConsentAt(id, Channel.SMS)).hasValueSatisfying(
+			at -> assertThat(at).isAtSameInstantAs(smsAt));
+
+		long rejected = customer("N", "N", "N", "N");
+		jdbc.update("UPDATE customer SET email_consent_at = ? WHERE customer_id = ?", emailAt, rejected);
+		assertThat(consentService.findConsentAt(rejected, Channel.EMAIL)).isEmpty();
+		long deleted = customer("Y", "Y", "N", "Y");
+		jdbc.update("UPDATE customer SET email_consent_at = ? WHERE customer_id = ?", emailAt, deleted);
+		assertThat(consentService.findConsentAt(deleted, Channel.EMAIL)).isEmpty();
+		assertThat(consentService.findConsentAt(Long.MAX_VALUE, Channel.EMAIL)).isEmpty();
 	}
 
 	private long customer(String email, String sms, String dormant, String deleted) {
