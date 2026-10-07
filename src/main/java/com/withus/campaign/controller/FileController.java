@@ -4,7 +4,6 @@ import java.io.IOException;
 import java.util.Locale;
 import java.util.Set;
 
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -32,11 +31,9 @@ public class FileController {
 	private static final Set<String> ALLOWED_EXTENSIONS = Set.of(".jpg", ".jpeg", ".png", ".gif");
 
 	private final FileStorage fileStorage;
-	private final String publicBaseUrl;
 
-	public FileController(FileStorage fileStorage, @Value("${withus.tracking.base-url}") String publicBaseUrl) {
+	public FileController(FileStorage fileStorage) {
 		this.fileStorage = fileStorage;
-		this.publicBaseUrl = publicBaseUrl;
 	}
 
 	@Operation(summary = "이미지 업로드", description = "jpg·png·gif, 최대 5MB. GET 가능한 공개 URL을 돌려준다.")
@@ -53,7 +50,7 @@ public class FileController {
 			throw new BusinessException(FileErrorCode.FILE_INVALID_TYPE);
 		}
 		String key = fileStorage.store(file.getOriginalFilename(), file.getInputStream(), file.getContentType());
-		return ApiResponse.ok(new FileUploadResponse(publicBaseUrl + "/files/" + key));
+		return ApiResponse.ok(new FileUploadResponse(fileStorage.publicUrl(key)));
 	}
 
 	/** 확장자와 Content-Type을 함께 검사한다 — 둘 중 하나만으로는 위조가 쉽다 */
