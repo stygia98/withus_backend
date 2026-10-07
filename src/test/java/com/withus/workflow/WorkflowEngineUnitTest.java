@@ -6,9 +6,12 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+
+import java.util.HashMap;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -76,6 +79,34 @@ class WorkflowEngineUnitTest {
 
 		verify(instanceMapper).moveToWaitPending(1L, 102L);
 		verify(instanceMapper, never()).moveToWait(anyLong(), anyLong(), any());
+	}
+
+	@Test
+	void 같은_캐시를_공유하는_인스턴스들은_단계를_한_번만_읽는다() {
+		step(100, NodeType.SEND_EMAIL, "{}", 101L, null, null);
+		step(101, NodeType.WAIT, "{\"amount\":2,\"unit\":\"DAY\"}", 102L, null, null);
+		when(instanceMapper.moveToWaitPending(anyLong(), anyLong())).thenReturn(1);
+
+		var cache = new HashMap<Long, WorkflowStep>();
+		for (int i = 0; i < 3; i++) {
+			engine.processOne(instance(100, 0), cache);
+		}
+
+		verify(stepMapper, times(1)).findById(100L);
+		verify(stepMapper, times(1)).findById(101L);
+		verify(instanceMapper, times(3)).moveToWaitPending(1L, 102L); // 캐시를 써도 실행 결과는 인스턴스마다 기록된다
+	}
+
+	@Test
+	void 캐시를_넘기지_않는_단건_실행은_매번_단계를_읽는다() {
+		step(100, NodeType.SEND_EMAIL, "{}", 101L, null, null);
+		step(101, NodeType.WAIT, "{\"amount\":2,\"unit\":\"DAY\"}", 102L, null, null);
+		when(instanceMapper.moveToWaitPending(anyLong(), anyLong())).thenReturn(1);
+
+		engine.processOne(instance(100, 0));
+		engine.processOne(instance(100, 0));
+
+		verify(stepMapper, times(2)).findById(100L);
 	}
 
 	@Test
