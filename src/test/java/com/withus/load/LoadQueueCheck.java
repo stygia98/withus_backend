@@ -62,8 +62,10 @@ class LoadQueueCheck {
 		// 실제 스케줄러가 돌고 캠페인을 ACTIVE 로 바꾸므로, 운영·공용 DB 에서는 절대 실행하지 않는다
 		assertThat(environment.acceptsProfiles(Profiles.of("local"))).as("local 프로필에서만 실행한다").isTrue();
 		assertThat(datasourceUrl).as("로컬 DB(localhost·127.0.0.1)에서만 실행한다").containsAnyOf("//localhost", "//127.0.0.1");
-		Long campaignId = jdbc.queryForObject("SELECT campaign_id FROM campaign WHERE name = ?", Long.class, LOAD_CAMPAIGN);
-		assertThat(campaignId).as("먼저 load-data.sql 로 부하 데이터를 만드세요").isNotNull();
+		// queryForObject 는 0건이면 EmptyResultDataAccessException 을 던져 아래 안내가 안 보이므로 목록으로 읽는다
+		List<Long> campaignIds = jdbc.queryForList("SELECT campaign_id FROM campaign WHERE name = ?", Long.class, LOAD_CAMPAIGN);
+		assertThat(campaignIds).as("먼저 load-data.sql 로 부하 데이터를 만드세요").isNotEmpty();
+		Long campaignId = campaignIds.get(0);
 		List<Long> customerIds = jdbc.queryForList(
 			"SELECT customer_id FROM customer WHERE email LIKE 'load-%@load.withus.local' ORDER BY customer_id", Long.class);
 		int n = customerIds.size();
