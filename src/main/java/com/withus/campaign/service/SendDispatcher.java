@@ -10,6 +10,8 @@ import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.event.ContextClosedEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -54,6 +56,14 @@ public class SendDispatcher {
 	private final WorkflowWakeup workflowWakeup;
 	private final boolean schedulerEnabled;
 
+	/**
+	 * 정상 종료가 시작됐다는 신호(이슈 #92). 선점 묶음(최대 50건)을 초당 1건으로 보내면 50초가 걸려 Spring 종료 단계 제한(30초)을
+	 * 넘기고, 그 뒤 DB 풀이 먼저 닫혀 인터럽트 경로의 revertUnprocessed 가 실패한다(선점분이 SENDING 으로 남아 UNKNOWN_RESULT 로 누락).
+	 * ContextClosedEvent 는 Lifecycle 정지·빈 소멸(DB 풀 종료)보다 먼저 발행되므로, 이 신호를 보면 현재 건만 마치고
+	 * 남은 선점분을 DB 가 살아 있을 때 PENDING 으로 되돌린다
+	 */
+	private volatile boolean stopping;
+
 	public SendDispatcher(SendLogMapper sendLogMapper, TemplateMapper templateMapper,
 			MessageSenderRouter messageSenderRouter, ConsentService consentService, MessageComposer messageComposer,
 			UnsubscribeTokens unsubscribeTokens,
@@ -82,20 +92,30 @@ public class SendDispatcher {
 	 */
 	@Scheduled(fixedDelay = 1000)
 	void scheduledDispatch() {
-		if (schedulerEnabled) {
+		if (schedulerEnabled && !stopping) {
 			dispatch();
 		}
 	}
 
+	@EventListener(ContextClosedEvent.class)
+	void onContextClosed() {
+		stopping = true;
+	}
+
 	public void dispatch() {
 		int processed = 0;
-		while (processed < MAX_PER_RUN) {
+		while (processed < MAX_PER_RUN && !stopping) {
 			List<SendLog> claimed = sendLogMapper.claimBatch();
 			if (claimed.isEmpty()) {
 				return;
 			}
 			for (int i = 0; i < claimed.size(); i++) {
 				SendLog sendLog = claimed.get(i);
+				if (stopping) {
+					// 정상 종료 중 — 아직 시작하지 않은 선점분을 DB 풀이 닫히기 전에 되돌린다(이슈 #92). attempt_count 는 소모하지 않는다
+					revertUnprocessed(claimed.subList(i, claimed.size()));
+					return;
+				}
 				try {
 					processOne(sendLog);
 				} catch (Exception e) {
