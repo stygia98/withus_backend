@@ -1,0 +1,36 @@
+# 운영 프로필 (W5, PRD 8.5 "프로필 전환만으로 운영 배포"). 실행: SPRING_PROFILES_ACTIVE=prod
+# 비밀값·환경별 값은 모두 환경변수로 주입한다 (CLAUDE.md 7장). 목록은 메인 저장소 infra/aws/env.prod.example
+# 공통 application.yml 을 그대로 쓰고, local 과 달라지는 값만 여기에 둔다
+spring:
+  flyway:
+    # 시드(db/seed/local)는 넣지 않는다 — 운영 DB 에는 스키마만 (DB_SCHEMA.md 9장, 이슈 #46)
+    locations: classpath:db/migration
+
+withus:
+  # 아래 세 값은 구현체 선택 조건(@ConditionalOnProperty)에 기본값이 없어, 빠지면 MessageSender·FileStorage 빈이 없어 기동이 실패한다
+  mail:
+    type: ses        # SesMessageSender — 리전은 AWS_REGION, 자격증명은 EC2 IAM 역할(DefaultCredentialsProvider)
+  storage:
+    type: s3         # S3FileStorage — 버킷은 S3_BUCKET, 객체는 images/ 아래에만 (버킷 정책으로 images/* 만 공개 읽기)
+  sms:
+    type: mock       # 실제 SMS 연동은 범위 밖(O-03)
+  ai:
+    type: ${WITHUS_AI_TYPE:gemini}
+  sender:
+    # 발신자 정보는 W5 배포 전 실제 값으로 교체한다(로드맵 6장). 재빌드 없이 바꿀 수 있게 환경변수로 덮어쓸 수 있게 둔다
+    name: ${WITHUS_SENDER_NAME:위드어스}
+    phone: ${WITHUS_SENDER_PHONE:02-000-0000}
+    unsubscribe-phone: ${WITHUS_SENDER_UNSUBSCRIBE_PHONE:080-000-0000}
+  cookie:
+    secure: true     # Amplify HTTPS 기본 주소를 거친다 (공통 기본값과 같지만 운영 의도를 명시)
+  scheduler:
+    consent-notice:
+      # F-12 수신동의 2년 안내 — 운영 시연에서는 제외(PL 결정 2026-10-07, backend #81). 켤 때만 true
+      enabled: ${WITHUS_SCHEDULER_CONSENT_NOTICE_ENABLED:false}
+
+springdoc:
+  # 운영에서는 API 문서를 열지 않는다 (SpringDocAppInitializer 경고). 계약 확인은 local 의 Swagger 로 한다
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
