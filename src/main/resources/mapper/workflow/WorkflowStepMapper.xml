@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.withus.workflow.mapper.WorkflowStepMapper">
+
+	<sql id="columns">
+		step_id, campaign_id, node_type, config_json::text AS config_json,
+		next_step_id, yes_step_id, no_step_id, depth, created_at, updated_at
+	</sql>
+
+	<select id="findByCampaignId" resultType="com.withus.workflow.domain.WorkflowStep">
+		SELECT <include refid="columns"/> FROM workflow_step
+		WHERE campaign_id = #{campaignId}
+		ORDER BY step_id
+	</select>
+
+	<select id="findById" resultType="com.withus.workflow.domain.WorkflowStep">
+		SELECT <include refid="columns"/> FROM workflow_step WHERE step_id = #{stepId}
+	</select>
+
+	<insert id="insertBatch" useGeneratedKeys="true" keyProperty="stepId">
+		INSERT INTO workflow_step (campaign_id, node_type, config_json, depth)
+		VALUES
+		<foreach collection="list" item="item" separator=",">
+			(#{item.campaignId}, #{item.nodeType}, COALESCE(CAST(#{item.configJson} AS jsonb), '{}'::jsonb), #{item.depth})
+		</foreach>
+	</insert>
+
+	<update id="updateLinks">
+		UPDATE workflow_step SET next_step_id = #{nextStepId}, yes_step_id = #{yesStepId},
+			no_step_id = #{noStepId}, updated_at = now()
+		WHERE step_id = #{stepId}
+	</update>
+
+	<!-- 노드마다 UPDATE 를 따로 보내지 않고 한 번에 잇는다(노드 최대 15개). 값이 null 이어도 타입을 알 수 있게 캐스트한다 -->
+	<update id="updateLinksBatch">
+		UPDATE workflow_step AS w SET next_step_id = v.next_id, yes_step_id = v.yes_id, no_step_id = v.no_id,
+			updated_at = now()
+		FROM (VALUES
+		<foreach collection="steps" item="item" separator=",">
+			(CAST(#{item.stepId} AS bigint), CAST(#{item.nextStepId,jdbcType=BIGINT} AS bigint),
+			 CAST(#{item.yesStepId,jdbcType=BIGINT} AS bigint), CAST(#{item.noStepId,jdbcType=BIGINT} AS bigint))
+		</foreach>
+		) AS v(step_id, next_id, yes_id, no_id)
+		WHERE w.step_id = v.step_id
+	</update>
+
+	<delete id="deleteByCampaignId">
+		DELETE FROM workflow_step WHERE campaign_id = #{campaignId}
+	</delete>
+	<select id="lockCampaignStatus" resultType="string">
+		SELECT status FROM campaign WHERE campaign_id = #{campaignId} FOR UPDATE
+	</select>
+</mapper>

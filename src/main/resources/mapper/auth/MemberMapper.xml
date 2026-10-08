@@ -50,4 +50,19 @@
 	<update id="clearRefreshToken">
 		UPDATE member SET refresh_token_hash = NULL, updated_at = now() WHERE member_id = #{memberId}
 	</update>
+
+	<select id="findAll" resultType="com.withus.auth.domain.Member">
+		SELECT <include refid="columns"/> FROM member ORDER BY member_id
+	</select>
+
+	<select id="existsEmail" resultType="boolean">
+		SELECT EXISTS (SELECT 1 FROM member WHERE email = #{email})
+	</select>
+
+	<update id="updateRoleAndActive">
+		UPDATE member
+		SET role = COALESCE(#{role}, role), active_yn = COALESCE(#{activeYn}, active_yn),
+		    refresh_token_hash = NULL, updated_at = now()
+		WHERE member_id = #{memberId}
+	</update>
 </mapper>

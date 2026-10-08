@@ -1,0 +1,220 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.withus.campaign.mapper.SendLogMapper">
+
+	<!--
+		SendLog 는 @Builder 전용 도메인(생성자가 전체 필드 1개뿐, no-arg 없음)이라 자동 매핑 대신
+		생성자 매핑을 쓴다. 순서는 SendLog.java 필드 선언 순서(= Lombok 이 만드는 생성자 인자 순서)와 같아야 한다.
+	-->
+	<resultMap id="sendLogResultMap" type="com.withus.campaign.domain.SendLog">
+		<constructor>
+			<idArg column="send_log_id" javaType="java.lang.Long"/>
+			<arg column="campaign_id" javaType="java.lang.Long"/>
+			<arg column="instance_id" javaType="java.lang.Long"/>
+			<arg column="step_id" javaType="java.lang.Long"/>
+			<arg column="customer_id" javaType="java.lang.Long"/>
+			<arg column="recipient" javaType="string"/>
+			<arg column="channel" javaType="com.withus.common.domain.Channel"/>
+			<arg column="ab_variant" javaType="string"/>
+			<arg column="status" javaType="com.withus.campaign.domain.SendStatus"/>
+			<arg column="kind" javaType="com.withus.campaign.domain.SendKind"/>
+			<!-- priority·attemptCount 는 생성자에서 원시형(short/int)이라 _short·_int(원시형 전용 별칭)를 써야 한다 -->
+			<arg column="priority" javaType="_short"/>
+			<arg column="provider_message_id" javaType="string"/>
+			<!-- UUID 는 기본 TypeHandler 가 없어 생성자 매핑 시 build 단계에서 바로 검증에 실패한다. UnknownTypeHandler 로 돌려 PG 드라이버가 ResultSet.getObject() 로 직접 UUID 를 주게 둔다 -->
+			<arg column="tracking_token" javaType="java.util.UUID" typeHandler="org.apache.ibatis.type.UnknownTypeHandler"/>
+			<arg column="attempt_count" javaType="_int"/>
+			<arg column="next_attempt_at" javaType="java.time.OffsetDateTime"/>
+			<arg column="error_message" javaType="string"/>
+			<arg column="sent_at" javaType="java.time.OffsetDateTime"/>
+			<arg column="created_at" javaType="java.time.OffsetDateTime"/>
+			<arg column="updated_at" javaType="java.time.OffsetDateTime"/>
+			<arg column="template_id" javaType="java.lang.Long"/>
+		</constructor>
+	</resultMap>
+
+	<select id="findRecipients" resultType="com.withus.campaign.domain.CustomerRecipient">
+		SELECT customer_id,
+			<choose>
+				<when test="channel == @com.withus.common.domain.Channel@EMAIL">email</when>
+				<otherwise>phone</otherwise>
+			</choose> AS recipient
+		FROM customer
+		WHERE deleted_yn = 'N'
+		AND customer_id IN
+		<foreach collection="customerIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+	</select>
+
+	<insert id="insertOneTimeBatch">
+		INSERT INTO send_log (campaign_id, instance_id, step_id, customer_id, recipient, channel, status, kind, priority, error_message)
+		VALUES
+		<foreach collection="logs" item="item" separator=",">
+			(#{item.campaignId}, #{item.instanceId}, #{item.stepId}, #{item.customerId}, #{item.recipient},
+			 #{item.channel}, #{item.status}, #{item.kind}, #{item.priority}, #{item.errorMessage})
+		</foreach>
+		ON CONFLICT (campaign_id, customer_id) WHERE instance_id IS NULL DO NOTHING
+	</insert>
+
+	<!-- 테스트 발송 1건. TEST 는 customer_id·campaign_id 가 NULL 이라 유니크 인덱스에 걸리지 않는다 -->
+	<insert id="insertTest">
+		INSERT INTO send_log (template_id, recipient, channel, status, kind, priority)
+		VALUES (#{templateId}, #{recipient}, #{channel}, 'PENDING', 'TEST', #{priority})
+	</insert>
+
+	<insert id="insertWorkflowBatch">
+		INSERT INTO send_log (campaign_id, instance_id, step_id, customer_id, recipient, channel, status, kind, priority, error_message)
+		VALUES
+		<foreach collection="logs" item="item" separator=",">
+			(#{item.campaignId}, #{item.instanceId}, #{item.stepId}, #{item.customerId}, #{item.recipient},
+			 #{item.channel}, #{item.status}, #{item.kind}, #{item.priority}, #{item.errorMessage})
+		</foreach>
+		ON CONFLICT ON CONSTRAINT uq_send_log_step DO NOTHING
+	</insert>
+
+	<!-- 시작 전에 적재됐다가 시작이 실패해 남은 일회성 PENDING·SKIPPED 를 지운다(SKIPPED 가 남으면 동의가 바뀐 고객이 ON CONFLICT 때문에 영영 못 받는다). 캠페인이 아직 DRAFT·SCHEDULED 일 때만, 한 번도 시도하지 않은
+	     (attempt_count = 0) 행만 지운다 — 동시에 시작된 캠페인이 ACTIVE 가 된 뒤의 재시도 대기 행(쿠폰 FK 가 걸릴 수 있음)은 건드리지 않는다.
+	     SENDING 이상·TEST·워크플로우 건도 제외 (이슈 #52) -->
+	<delete id="deleteUnstartedCampaignPending">
+		DELETE FROM send_log
+		WHERE campaign_id = #{campaignId} AND kind = 'CAMPAIGN' AND status IN ('PENDING', 'SKIPPED') AND instance_id IS NULL
+		  AND attempt_count = 0
+		  AND EXISTS (SELECT 1 FROM campaign c WHERE c.campaign_id = send_log.campaign_id
+		              AND c.status IN ('DRAFT', 'SCHEDULED'))
+	</delete>
+
+	<!-- UPDATE ... RETURNING 은 select 로 선언해야 ResultSet 을 받는다 (MyBatis+PostgreSQL 관용 패턴) -->
+	<select id="claimBatch" resultMap="sendLogResultMap" flushCache="true">
+		WITH claimed AS (
+			UPDATE send_log SET status = 'SENDING', updated_at = now()
+			WHERE send_log_id IN (
+				SELECT send_log_id FROM send_log
+				WHERE status = 'PENDING' AND (next_attempt_at IS NULL OR next_attempt_at &lt;= now())
+				  AND (send_log.kind &lt;&gt; 'CAMPAIGN' OR NOT EXISTS (
+				      SELECT 1 FROM campaign c
+				      WHERE c.campaign_id = send_log.campaign_id AND c.status IN ('DRAFT', 'SCHEDULED', 'PAUSED')
+				  ))
+				ORDER BY priority, send_log_id
+				LIMIT 50
+				FOR UPDATE SKIP LOCKED
+			)
+			RETURNING *
+		)
+		SELECT * FROM claimed ORDER BY priority, send_log_id
+	</select>
+
+	<!-- 결과 기록 UPDATE 는 전부 AND status = 'SENDING' 을 건다: 응답이 지연돼 recoverStuckSending 이 먼저
+	     FAILED(UNKNOWN_RESULT) 로 처리한 건을 늦은 결과가 PENDING 으로 되돌려 재발송하는 일을 막는다 (PR #21 리뷰) -->
+	<update id="recordSent">
+		UPDATE send_log SET status = 'SENT', sent_at = now(), provider_message_id = #{providerMessageId}
+		WHERE send_log_id = #{sendLogId} AND status = 'SENDING'
+	</update>
+
+	<update id="recordFailed">
+		UPDATE send_log SET status = 'FAILED', error_message = #{errorMessage}
+		WHERE send_log_id = #{sendLogId} AND status = 'SENDING'
+	</update>
+
+	<select id="findByProviderMessageId" resultMap="sendLogResultMap">
+		SELECT * FROM send_log WHERE provider_message_id = #{providerMessageId}
+	</select>
+
+	<update id="markBounced">
+		UPDATE send_log SET status = 'BOUNCED' WHERE provider_message_id = #{providerMessageId} AND status = 'SENT'
+	</update>
+
+	<select id="findCampaignStatus" resultType="string">
+		SELECT status FROM campaign WHERE campaign_id = #{campaignId}
+	</select>
+
+	<!-- 사유를 error_message 에 남기고 이전 재시도의 error_message 는 덮어쓴다(원인이 잘못 보이지 않게, PR #21 리뷰) -->
+	<update id="recordSkipped">
+		UPDATE send_log SET status = 'SKIPPED', error_message = #{reason}
+		WHERE send_log_id = #{sendLogId} AND status = 'SENDING'
+	</update>
+
+	<update id="revertToPending">
+		UPDATE send_log SET status = 'PENDING' WHERE send_log_id = #{sendLogId} AND status = 'SENDING'
+	</update>
+
+	<update id="holdForSendWindow">
+		UPDATE send_log SET status = 'PENDING', next_attempt_at = #{nextAttemptAt}
+		WHERE send_log_id = #{sendLogId} AND status = 'SENDING'
+	</update>
+
+	<update id="recordRetry">
+		UPDATE send_log SET status = 'PENDING', attempt_count = attempt_count + 1,
+			next_attempt_at = #{nextAttemptAt}, error_message = #{errorMessage}
+		WHERE send_log_id = #{sendLogId} AND status = 'SENDING'
+	</update>
+
+	<select id="recoverStuckSending" resultMap="sendLogResultMap" flushCache="true">
+		UPDATE send_log SET status = 'FAILED', error_message = 'UNKNOWN_RESULT'
+		WHERE status = 'SENDING' AND updated_at &lt; now() - interval '10 minutes'
+		RETURNING *
+	</select>
+
+	<select id="findTerminalSendsOfWaitingInstances" resultMap="sendLogResultMap">
+		SELECT sl.* FROM workflow_instance wi
+		JOIN LATERAL (
+			SELECT * FROM send_log s WHERE s.instance_id = wi.instance_id ORDER BY s.send_log_id DESC LIMIT 1
+		) sl ON TRUE
+		WHERE wi.status = 'WAITING' AND wi.next_run_at IS NULL AND wi.updated_at &lt; now() - interval '1 minute'
+		  AND sl.status IN ('SENT', 'FAILED', 'SKIPPED', 'BOUNCED')
+		LIMIT 500
+	</select>
+
+	<select id="findPlaceholderSource" resultType="com.withus.campaign.domain.CustomerPlaceholderSource">
+		SELECT name, email, region_code, total_purchase FROM customer WHERE customer_id = #{customerId}
+	</select>
+
+	<select id="findPreviewSource" resultType="com.withus.campaign.domain.CustomerPlaceholderSource">
+		SELECT name, email, region_code, total_purchase FROM customer WHERE customer_id = #{customerId} AND deleted_yn = 'N'
+	</select>
+
+	<select id="findPlaceholderSources" resultType="com.withus.campaign.domain.CustomerPlaceholderSource">
+		SELECT name, email, region_code, total_purchase FROM customer
+		WHERE deleted_yn = 'N' AND customer_id IN
+		<foreach collection="customerIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+	</select>
+
+	<select id="findCouponIdByCampaignId" resultType="long">
+		SELECT coupon_id FROM campaign WHERE campaign_id = #{campaignId}
+	</select>
+
+	<select id="findCouponIdByStepId" resultType="long">
+		SELECT (config_json ->> 'couponId')::bigint FROM workflow_step WHERE step_id = #{stepId}
+	</select>
+
+	<select id="isCouponValid" resultType="java.lang.Boolean">
+		SELECT CURRENT_DATE BETWEEN valid_from AND valid_to FROM coupon WHERE coupon_id = #{couponId}
+	</select>
+
+	<update id="recordSkippedCoupon">
+		UPDATE send_log SET status = 'SKIPPED', error_message = 'COUPON_INVALID'
+		WHERE send_log_id = #{sendLogId} AND status = 'SENDING'
+	</update>
+
+	<!-- 새 캠페인을 시작하기 전, 이미 밀려 있는 대기분(캠페인 3/4 estimate). claimBatch 와 같은 조건으로 선점 가능한 행만 센다 —
+	     DRAFT·SCHEDULED·PAUSED 캠페인의 막힌 행(시작 실패로 남은 고아 포함)이 모든 캠페인의 소요 시간을 부풀리지 않게 한다 (이슈 #53) -->
+	<select id="countPending" resultType="long">
+		SELECT count(*) FROM send_log
+		WHERE status = 'PENDING'
+		  AND (kind &lt;&gt; 'CAMPAIGN' OR NOT EXISTS (
+		      SELECT 1 FROM campaign c
+		      WHERE c.campaign_id = send_log.campaign_id AND c.status IN ('DRAFT', 'SCHEDULED', 'PAUSED')
+		  ))
+	</select>
+
+	<select id="findStatusByInstanceStep" resultType="com.withus.campaign.domain.SendStatus">
+		SELECT status FROM send_log WHERE instance_id = #{instanceId} AND step_id = #{stepId}
+	</select>
+
+	<select id="findResultById" resultType="com.withus.campaign.domain.SendLog">
+		SELECT * FROM send_log WHERE send_log_id = #{sendLogId}
+	</select>
+
+	<select id="findLatestSendLogId" resultType="long">
+		SELECT send_log_id FROM send_log WHERE instance_id = #{instanceId} AND channel = #{channel}
+		ORDER BY send_log_id DESC LIMIT 1
+	</select>
+</mapper>

@@ -8,11 +8,15 @@
 # 1) 메인 저장소 infra/.env.example 을 infra/.env 로 복사하고 값 입력
 # 2) cd ../infra && docker compose up -d
 ./mvnw spring-boot:run -Dspring-boot.run.profiles=local
-./mvnw test          # PR 전 필수 (DB 컨테이너 필요)
+./mvnw test          # PR 전 필수 (DB + Mailpit 필요)
+./mvnw spring-boot:run -Dspring-boot.run.profiles=prod   # 운영 프로필 — 환경변수는 메인 저장소 infra/aws/env.prod.example
 ```
+- `./mvnw test` 는 PostgreSQL 과 **Mailpit(SMTP 1025)이 둘 다 떠 있어야** 통과한다. Mailpit 이 없으면 발송 디스패처 테스트(`SendDispatcher*`)가 SMTP 연결 거부로 `PENDING`(재시도 대기)에 머물러 실패한다.
+- Docker 없이도 된다: PC 에 설치한 PostgreSQL 17(`infra/.env` 의 계정을 맞춘다) + `winget install axllent.mailpit` 후 `mailpit` 실행.
+- 테스트는 `local` 프로필로 같은 DB 를 쓴다. 띄워 둔 서버(`spring-boot:run`)의 스케줄러가 테스트 데이터를 가져갈 수 있으니 테스트 중에는 서버를 내린다.
 - Swagger UI: http://localhost:8080/swagger-ui/index.html
 - Mailpit: http://localhost:8025
-- `local` 프로필은 `../infra/.env` 를 읽는다. 없으면 OS 환경변수 `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`, `JWT_SECRET`(32자 이상, 필수), `OWNER_EMAIL`, `OWNER_PASSWORD` 를 쓴다.
+- `local` 프로필은 `../infra/.env` 를 읽는다. 없으면 OS 환경변수 `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`, `JWT_SECRET`(32자 이상, 필수), `OWNER_EMAIL`, `OWNER_PASSWORD` 를 쓴다. `HMAC_SECRET`(수신거부 토큰 서명 키, 32자 이상)은 운영 필수이고 local 은 없으면 개발용 값을 쓴다.
 
 ## 팀원용 사용법
 

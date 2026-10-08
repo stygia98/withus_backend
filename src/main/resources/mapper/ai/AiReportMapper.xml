@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.withus.ai.mapper.AiReportMapper">
+
+	<select id="insert" resultType="long" flushCache="true">
+		INSERT INTO ai_report (campaign_id, report_type, input_json, content, model)
+		VALUES (#{campaignId}, #{reportType}, CAST(#{inputJson} AS jsonb), #{content}, #{model})
+		RETURNING report_id
+	</select>
+
+	<select id="findLatest" resultType="com.withus.ai.domain.AiReport" flushCache="true">
+		SELECT report_id, campaign_id, report_type, CAST(input_json AS text) AS input_json, content, model, created_at
+		FROM ai_report
+		WHERE campaign_id = #{campaignId} AND report_type = #{reportType}
+		ORDER BY report_id DESC
+		LIMIT 1
+	</select>
+</mapper>

@@ -6,15 +6,37 @@ spring:
     # Mailpit SMTP
     host: localhost
     port: 1025
+    properties:
+      # JavaMail 은 기본 타임아웃이 없다 — 응답이 10분 넘게 지연되면 멈춤 복구(UNKNOWN_RESULT)와 겹쳐
+      # 늦은 응답이 결과를 덮어쓸 수 있어 짧게 둔다(PR #21 리뷰). 단위 ms
+      mail.smtp.connectiontimeout: 5000
+      mail.smtp.timeout: 15000
+      mail.smtp.writetimeout: 15000
   flyway:
-    # local 전용 시드(R__seed_local.sql, 반복 실행)는 db/migration/local 에 둔다 (DB_SCHEMA.md 9장)
-    locations: classpath:db/migration,classpath:db/migration/local
+    # local 전용 시드(R__seed_local.sql, 반복 실행)는 db/seed/local 에 둔다 (DB_SCHEMA.md 9장).
+    # db/migration 아래에 두면 안 된다: Flyway 는 location 을 하위 폴더까지 재귀로 스캔해서, 운영(locations: classpath:db/migration)에도
+    # 시드가 적용된다(이슈 #46). 이 폴더는 db/migration 의 하위가 아니므로 이 프로필에서만 읽힌다
+    locations: classpath:db/migration,classpath:db/seed/local
+    # 브랜치를 오가며 DB 에는 적용됐지만 지금 코드에는 없는 마이그레이션(다른 팀원 대역 등)이 있어도 기동한다.
+    # local 전용 — 운영은 검증을 그대로 둔다
+    ignore-migration-patterns: "*:missing"
 
 withus:
+  mail:
+    type: smtp
   storage:
     type: local
     local-path: ./uploads
   sms:
     type: mock
+  ai:
+    type: ${WITHUS_AI_TYPE:mock}
+  unsubscribe:
+    # .env 에 HMAC_SECRET 이 없어도 로컬 기동·테스트가 되도록 둔 개발 전용 값 (비밀 아님, 운영은 환경변수 필수)
+    hmac-secret: ${HMAC_SECRET:local-dev-only-unsubscribe-hmac-key-0000}
+  tracking:
+    # 메일 링크(오픈 픽셀·클릭·쿠폰·수신거부)와 업로드 이미지 주소의 기준. 운영(Amplify)처럼 프론트(3000)를 거치게 둬서
+    # 로컬에서도 /t/*·/files/* 프록시와 쿠폰·수신거부 화면(프론트)이 같은 구조로 동작한다. 8080(백엔드)으로 두면 메일의 쿠폰·수신거부 링크가 401 이 난다
+    base-url: ${WITHUS_PUBLIC_BASE_URL:http://localhost:3000}
   cookie:
     secure: false   # 로컬 http

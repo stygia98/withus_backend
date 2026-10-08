@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.withus.tracking.mapper.DashboardMapper">
+
+	<!--
+		지표 정의 (PRD F-09, API_SPEC 10장): 모든 지표는 kind = 'CAMPAIGN', 이벤트는 bot_yn = 'N' 만.
+		시도 = SENT + BOUNCED + FAILED, 성공 = SENT, 고유 오픈·클릭·전환은 성공 발송 기준 고유 고객 수.
+	-->
+	<select id="sendStats" resultType="com.withus.tracking.domain.SendStats">
+		WITH base AS (
+			SELECT s.send_log_id, s.customer_id, s.status
+			FROM send_log s
+			WHERE s.kind = 'CAMPAIGN'
+			  AND s.status IN ('SENT', 'BOUNCED', 'FAILED')
+			<if test="campaignId != null">
+			  AND s.campaign_id = #{campaignId}
+			</if>
+			<if test="stepId != null">
+			  AND s.step_id = #{stepId}
+			</if>
+			<include refid="sendPeriod"/>
+		),
+		sent AS (
+			SELECT send_log_id, customer_id FROM base WHERE status = 'SENT'
+		)
+		SELECT
+			(SELECT count(*) FROM base) AS attempted,
+			(SELECT count(*) FROM sent) AS sent,
+			(SELECT count(DISTINCT x.customer_id) FROM sent x
+			  WHERE EXISTS (SELECT 1 FROM track_event e
+			                WHERE e.send_log_id = x.send_log_id AND e.event_type = 'OPEN' AND e.bot_yn = 'N')) AS unique_opens,
+			(SELECT count(DISTINCT x.customer_id) FROM sent x
+			  WHERE EXISTS (SELECT 1 FROM track_event e
+			                WHERE e.send_log_id = x.send_log_id AND e.event_type = 'CLICK' AND e.bot_yn = 'N')) AS unique_clicks,
+			(SELECT count(DISTINCT x.customer_id) FROM sent x
+			  JOIN coupon_issue ci ON ci.send_log_id = x.send_log_id
+			  WHERE ci.used_at IS NOT NULL) AS coupon_used
+	</select>
+
+	<!--
+		단계별 KPI 를 한 번에 집계한다 (단계마다 sendStats 를 부르면 단계 수만큼 send_log 를 훑는다).
+		지표 정의는 sendStats 와 같다 — 성공 발송 중 사람 이벤트·쿠폰 사용이 있는 고유 고객 수.
+	-->
+	<select id="sendStatsByStep" resultType="com.withus.tracking.domain.StepSendStats">
+		WITH base AS (
+			SELECT s.send_log_id, s.step_id, s.customer_id, s.status
+			FROM send_log s
+			WHERE s.kind = 'CAMPAIGN'
+			  AND s.status IN ('SENT', 'BOUNCED', 'FAILED')
+			  AND s.campaign_id = #{campaignId}
+			  AND s.step_id IS NOT NULL
+			<include refid="sendPeriod"/>
+		),
+		flags AS (
+			SELECT b.step_id, b.customer_id, b.status,
+			       EXISTS (SELECT 1 FROM track_event e
+			               WHERE e.send_log_id = b.send_log_id AND e.event_type = 'OPEN' AND e.bot_yn = 'N')  AS opened,
+			       EXISTS (SELECT 1 FROM track_event e
+			               WHERE e.send_log_id = b.send_log_id AND e.event_type = 'CLICK' AND e.bot_yn = 'N') AS clicked,
+			       EXISTS (SELECT 1 FROM coupon_issue ci
+			               WHERE ci.send_log_id = b.send_log_id AND ci.used_at IS NOT NULL)                AS coupon_used
+			FROM base b
+		)
+		SELECT step_id,
+		       count(*)                                                               AS attempted,
+		       count(*) FILTER (WHERE status = 'SENT')                                AS sent,
+		       count(DISTINCT customer_id) FILTER (WHERE status = 'SENT' AND opened)      AS unique_opens,
+		       count(DISTINCT customer_id) FILTER (WHERE status = 'SENT' AND clicked)     AS unique_clicks,
+		       count(DISTINCT customer_id) FILTER (WHERE status = 'SENT' AND coupon_used) AS coupon_used
+		FROM flags
+		GROUP BY step_id
+	</select>
+
+	<!--
+		기간 판정 시각: 성공·반송은 발송 시각, 실패는 적재 시각(created_at).
+		실패 건의 updated_at 은 이후 처리 때마다 바뀌어 같은 기간 조회 결과가 달라질 수 있어 쓰지 않는다.
+	-->
+	<sql id="sendPeriod">
+		<if test="from != null">
+		  AND COALESCE(s.sent_at, s.created_at) &gt;= #{from}
+		</if>
+		<if test="to != null">
+		  AND COALESCE(s.sent_at, s.created_at) &lt; #{to}
+		</if>
+	</sql>
+
+	<!-- 발송이 없는 날도 0 으로 나오도록 날짜 뼈대를 먼저 만든다 (세션 타임존 Asia/Seoul) -->
+	<select id="dailySends" resultType="com.withus.tracking.domain.DailySendRow">
+		SELECT CAST(d.day AS date) AS date, count(s.send_log_id) AS sent
+		FROM generate_series(CAST(#{from} AS date), CAST(#{to} AS date), interval '1 day') AS d(day)
+		LEFT JOIN send_log s
+		       ON s.kind = 'CAMPAIGN'
+		      AND s.status = 'SENT'
+		      AND s.sent_at &gt;= d.day
+		      AND s.sent_at &lt; d.day + interval '1 day'
+		GROUP BY d.day
+		ORDER BY d.day
+	</select>
+
+	<select id="queueCounts" resultType="com.withus.tracking.domain.QueueCounts">
+		SELECT count(*) FILTER (WHERE status = 'PENDING' AND attempt_count = 0) AS pending,
+		       count(*) FILTER (WHERE status = 'SENDING')                       AS sending,
+		       count(*) FILTER (WHERE status = 'PENDING' AND attempt_count &gt; 0) AS retrying
+		FROM send_log
+		WHERE status IN ('PENDING', 'SENDING')
+	</select>
+
+	<select id="recentEvents" resultType="com.withus.tracking.domain.RecentEventRow">
+		SELECT e.event_id, e.event_type, e.occurred_at, s.campaign_id, c.name AS campaign_name, cu.name AS customer_name
+		FROM track_event e
+		JOIN send_log s       ON s.send_log_id = e.send_log_id
+		LEFT JOIN campaign c  ON c.campaign_id = s.campaign_id
+		LEFT JOIN customer cu ON cu.customer_id = s.customer_id
+		WHERE e.bot_yn = 'N'
+		  AND s.kind = 'CAMPAIGN'
+		<if test="after != null">
+		  AND e.event_id &gt; #{after}
+		</if>
+		ORDER BY e.event_id DESC
+		LIMIT #{limit}
+	</select>
+
+	<select id="campaignName" resultType="string">
+		SELECT name FROM campaign WHERE campaign_id = #{campaignId}
+	</select>
+
+	<select id="campaignType" resultType="string">
+		SELECT type FROM campaign WHERE campaign_id = #{campaignId}
+	</select>
+
+	<!--
+		config_json 의 templateId·couponId 는 숫자일 때만 쓴다 (DB_SCHEMA 5.2, TrackLinkMapper 와 같은 방어).
+		단계 순서는 step_id 순 — 워크플로우 저장 시 노드 배열 순서로 만들어진다.
+	-->
+	<select id="sendSteps" resultType="com.withus.tracking.domain.SendStepRow">
+		SELECT ws.step_id, ws.node_type, t.template_id, t.name AS template_name,
+		       CASE WHEN ws.config_json ->> 'couponId' ~ '^[0-9]{1,18}$'
+		            THEN CAST(ws.config_json ->> 'couponId' AS bigint) END AS coupon_id
+		FROM workflow_step ws
+		-- AND 는 계산 순서가 보장되지 않아 CASE 로 감싼다 (숫자가 아니면 CAST 하지 않음)
+		LEFT JOIN template t
+		       ON t.template_id = CASE WHEN ws.config_json ->> 'templateId' ~ '^[0-9]{1,18}$'
+		                               THEN CAST(ws.config_json ->> 'templateId' AS bigint) END
+		WHERE ws.campaign_id = #{campaignId}
+		  AND ws.node_type IN ('SEND_EMAIL', 'SEND_SMS')
+		ORDER BY ws.step_id
+	</select>
+</mapper>

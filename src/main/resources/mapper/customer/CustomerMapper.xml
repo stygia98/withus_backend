@@ -1,0 +1,247 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.withus.customer.mapper.CustomerMapper">
+
+	<sql id="columns">
+		customer_id, name, email, phone, region_code, birth_date, joined_at, total_purchase,
+		email_consent_yn, email_consent_at, sms_consent_yn, sms_consent_at, dormant_yn, source, created_at, updated_at
+	</sql>
+
+	<select id="findActiveById" resultType="com.withus.customer.domain.Customer">
+		SELECT <include refid="columns"/> FROM customer WHERE customer_id = #{customerId} AND deleted_yn = 'N'
+	</select>
+
+	<select id="findById" resultType="com.withus.customer.domain.Customer">
+		SELECT <include refid="columns"/> FROM customer WHERE customer_id = #{customerId}
+	</select>
+
+	<select id="existsActiveEmail" resultType="boolean">
+		SELECT EXISTS (
+			SELECT 1 FROM customer
+			WHERE email = #{email} AND deleted_yn = 'N'
+			<if test="excludeId != null">AND customer_id &lt;&gt; #{excludeId}</if>
+		)
+	</select>
+
+	<insert id="insert" useGeneratedKeys="true" keyProperty="customerId" keyColumn="customer_id">
+		INSERT INTO customer (name, email, phone, region_code, birth_date, joined_at,
+			email_consent_yn, email_consent_at, sms_consent_yn, sms_consent_at, source)
+		VALUES (#{name}, #{email}, #{phone}, #{regionCode}, #{birthDate}, #{joinedAt},
+			#{emailConsentYn}, CASE WHEN #{emailConsentYn} = 'Y' THEN now() END,
+			#{smsConsentYn}, CASE WHEN #{smsConsentYn} = 'Y' THEN now() END, #{source})
+	</insert>
+
+	<update id="update">
+		UPDATE customer
+		SET name = #{f.name}, email = #{f.email}, phone = #{f.phone}, region_code = #{f.regionCode},
+		    birth_date = #{f.birthDate}, joined_at = #{f.joinedAt}, updated_at = now()
+		WHERE customer_id = #{customerId} AND deleted_yn = 'N'
+	</update>
+
+	<update id="softDelete">
+		UPDATE customer SET deleted_yn = 'Y', updated_at = now()
+		WHERE customer_id = #{customerId} AND deleted_yn = 'N'
+	</update>
+
+	<select id="findSuppressedChannels" resultType="com.withus.common.domain.Channel">
+		SELECT channel FROM suppression
+		WHERE (channel = 'EMAIL' AND value = #{email}) OR (channel = 'SMS' AND value = #{phone})
+		ORDER BY channel
+	</select>
+
+	<insert id="insertConsentHistory">
+		INSERT INTO consent_history (customer_id, channel, before_yn, after_yn, source, note)
+		VALUES (#{customerId}, #{channel}, #{beforeYn}, #{afterYn}, #{source}, #{note})
+	</insert>
+
+	<!-- 목록 조건. LIKE 패턴은 서비스에서 이스케이프해서 넘긴다 -->
+	<sql id="searchWhere">
+		<where>
+			deleted_yn = 'N'
+			<if test="s.keywordName != null">
+				AND (name ILIKE #{s.keywordName} OR email LIKE #{s.keywordEmail}
+				<if test="s.keywordPhone != null">OR phone LIKE #{s.keywordPhone}</if>)
+			</if>
+			<if test="s.regionCode != null">AND region_code = #{s.regionCode}</if>
+			<if test="s.emailConsent != null">AND email_consent_yn = #{s.emailConsent}</if>
+			<if test="s.smsConsent != null">AND sms_consent_yn = #{s.smsConsent}</if>
+			<if test="s.dormant != null">AND dormant_yn = #{s.dormant}</if>
+		</where>
+	</sql>
+
+	<select id="search" resultType="com.withus.customer.domain.Customer">
+		SELECT <include refid="columns"/> FROM customer
+		<include refid="searchWhere"/>
+		ORDER BY
+		<choose>
+			<when test="s.sort == @com.withus.customer.domain.CustomerSort@NAME">name</when>
+			<when test="s.sort == @com.withus.customer.domain.CustomerSort@JOINED_AT">joined_at</when>
+			<when test="s.sort == @com.withus.customer.domain.CustomerSort@TOTAL_PURCHASE">total_purchase</when>
+			<otherwise>created_at</otherwise>
+		</choose>
+		<if test="s.desc">DESC</if> NULLS LAST, customer_id DESC
+		LIMIT #{s.limit} OFFSET #{s.offset}
+	</select>
+
+	<select id="count" resultType="long">
+		SELECT count(*) FROM customer <include refid="searchWhere"/>
+	</select>
+
+	<update id="updateConsent">
+		UPDATE customer SET
+		<choose>
+			<when test="channel == @com.withus.common.domain.Channel@EMAIL">
+				email_consent_yn = #{yn}, email_consent_at = CASE WHEN #{yn} = 'Y' THEN now() END,
+			</when>
+			<otherwise>
+				sms_consent_yn = #{yn}, sms_consent_at = CASE WHEN #{yn} = 'Y' THEN now() END,
+			</otherwise>
+		</choose>
+		updated_at = now()
+		WHERE customer_id = #{customerId} AND deleted_yn = 'N'
+	</update>
+
+	<delete id="deleteSuppression">
+		DELETE FROM suppression WHERE channel = #{channel} AND value = #{value}
+	</delete>
+
+	<insert id="insertSuppression">
+		INSERT INTO suppression (channel, value, reason) VALUES (#{channel}, #{value}, #{reason})
+		ON CONFLICT (channel, value) DO NOTHING
+	</insert>
+
+	<!-- UPDATE ... RETURNING 이라 select 로 둔다 (쓰기이므로 캐시 비움) -->
+	<select id="rejectConsentByValue" resultType="long" flushCache="true">
+		UPDATE customer SET
+		<choose>
+			<when test="channel == @com.withus.common.domain.Channel@EMAIL">
+				email_consent_yn = 'N', email_consent_at = NULL, updated_at = now()
+				WHERE email = #{value} AND email_consent_yn = 'Y'
+			</when>
+			<otherwise>
+				sms_consent_yn = 'N', sms_consent_at = NULL, updated_at = now()
+				WHERE phone = #{value} AND sms_consent_yn = 'Y'
+			</otherwise>
+		</choose>
+		AND deleted_yn = 'N'
+		RETURNING customer_id
+	</select>
+
+	<!-- 발송 큐 적재·발송 직전 재확인용 (PRD 8.2). 휴면은 보지 않는다 (F-11: 휴면도 발송 가능) -->
+	<select id="isSendable" resultType="boolean">
+		SELECT EXISTS (
+			SELECT 1 FROM customer c
+			WHERE c.customer_id = #{customerId} <include refid="sendable"/>
+		)
+	</select>
+
+	<select id="filterSendable" resultType="long">
+		SELECT c.customer_id FROM customer c
+		WHERE c.customer_id IN
+		<foreach collection="customerIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+		<include refid="sendable"/>
+	</select>
+
+	<!-- F-12 NOTICE 본문의 동의 날짜 (#81). 삭제 고객·동의 N 이면 행 없음 -->
+	<select id="findConsentAt" resultType="java.time.OffsetDateTime">
+		SELECT
+		<choose>
+			<when test="channel == @com.withus.common.domain.Channel@EMAIL">c.email_consent_at</when>
+			<otherwise>c.sms_consent_at</otherwise>
+		</choose>
+		FROM customer c
+		WHERE c.customer_id = #{customerId} AND c.deleted_yn = 'N'
+		<choose>
+			<when test="channel == @com.withus.common.domain.Channel@EMAIL">AND c.email_consent_yn = 'Y'</when>
+			<otherwise>AND c.sms_consent_yn = 'Y'</otherwise>
+		</choose>
+	</select>
+
+	<!-- 발송 가능 판정 (PRD 8.2): 삭제 N + 채널 동의 Y + suppression 미포함 (SMS 는 휴대폰 필수) -->
+	<sql id="sendable">
+		AND c.deleted_yn = 'N'
+		<choose>
+			<when test="channel == @com.withus.common.domain.Channel@EMAIL">
+				AND c.email_consent_yn = 'Y'
+				AND NOT EXISTS (SELECT 1 FROM suppression s WHERE s.channel = 'EMAIL' AND s.value = c.email)
+			</when>
+			<otherwise>
+				AND c.sms_consent_yn = 'Y'
+				AND c.phone IS NOT NULL
+				AND NOT EXISTS (SELECT 1 FROM suppression s WHERE s.channel = 'SMS' AND s.value = c.phone)
+			</otherwise>
+		</choose>
+	</sql>
+
+	<!-- 휴면 판정 (PRD F-11): 최근 180일 클릭(봇 제외)·구매가 하나라도 있으면 활동.
+	     클릭은 CAMPAIGN 발송만 센다 (CLAUDE.md 6장 8번: TEST·NOTICE 는 모든 지표에서 제외). 오픈은 보지 않는다 -->
+	<sql id="activeIn180Days">
+		(EXISTS (SELECT 1 FROM purchase p
+		         WHERE p.customer_id = c.customer_id AND p.purchased_at >= now() - INTERVAL '180 days')
+		 OR EXISTS (SELECT 1 FROM send_log s JOIN track_event e ON e.send_log_id = s.send_log_id
+		            WHERE s.customer_id = c.customer_id AND s.kind = 'CAMPAIGN'
+		              AND e.event_type = 'CLICK' AND e.bot_yn = 'N' AND e.occurred_at >= now() - INTERVAL '180 days'))
+	</sql>
+
+	<!-- 가입 후 180일이 지난 고객만 판정한다 -->
+	<update id="markDormant">
+		UPDATE customer c SET dormant_yn = 'Y', dormant_at = now(), updated_at = now()
+		WHERE c.deleted_yn = 'N' AND c.dormant_yn = 'N' AND c.joined_at &lt;= CURRENT_DATE - 180
+		  AND NOT <include refid="activeIn180Days"/>
+	</update>
+
+	<!-- 활동이 생겼거나, 가입일 수정으로 판정 대상에서 빠진 휴면 고객 -->
+	<update id="releaseDormant">
+		UPDATE customer c SET dormant_yn = 'N', dormant_at = NULL, updated_at = now()
+		WHERE c.deleted_yn = 'N' AND c.dormant_yn = 'Y'
+		  AND (c.joined_at &gt; CURRENT_DATE - 180 OR <include refid="activeIn180Days"/>)
+	</update>
+
+	<!-- F-12: 발송 큐(팀원2)에 콜백을 두지 않고 send_log 를 주기 조회해 갱신한다 (PL 결정, #21).
+	     채널 구분 없는 가장 최근 안내 일시(표시용, #40 PL 결정). BOUNCED 도 실제로 발송된 건이다. 뒤로 가지 않는다 -->
+	<update id="syncConsentNotifiedAt">
+		UPDATE customer c SET consent_notified_at = s.sent_at, updated_at = now()
+		FROM (SELECT customer_id, max(sent_at) AS sent_at FROM send_log
+		      WHERE kind = 'NOTICE' AND status IN ('SENT', 'BOUNCED') AND customer_id IS NOT NULL
+		      GROUP BY customer_id) s
+		WHERE c.customer_id = s.customer_id AND c.deleted_yn = 'N'
+		  AND (c.consent_notified_at IS NULL OR c.consent_notified_at &lt; s.sent_at)
+	</update>
+
+	<!--
+		F-12 대상: 발송 가능(sendable: 삭제 N·동의 Y·suppression 아님·SMS 는 휴대폰) 이고
+		기준일 = GREATEST(채널 동의 일시, 같은 채널 마지막 발송된 NOTICE) 로부터 2년 — consent_notified_at 은 채널 구분이 없어
+		기준으로 쓰지 않는다. 같은 채널 NOTICE 가 진행 중(PENDING·SENDING)이거나 30일 안에 시도됐으면(상태 무관) 제외한다:
+		실패·결과 모름(UNKNOWN_RESULT)을 매일 다시 넣지 않기 위한 쿨다운 (#40 리뷰, 30일 PL 확정)
+	-->
+	<select id="findConsentNoticeTargets" resultType="long">
+		SELECT c.customer_id FROM customer c
+		WHERE c.customer_id &gt; #{afterId} <include refid="sendable"/>
+		<choose>
+			<when test="channel == @com.withus.common.domain.Channel@EMAIL">
+				AND c.email IS NOT NULL
+				AND GREATEST(c.email_consent_at, <include refid="lastSentNotice"/>) &lt;= now() - INTERVAL '2 years'
+			</when>
+			<otherwise>
+				AND GREATEST(c.sms_consent_at, <include refid="lastSentNotice"/>) &lt;= now() - INTERVAL '2 years'
+			</otherwise>
+		</choose>
+		  AND NOT EXISTS (SELECT 1 FROM send_log s
+		                  WHERE s.customer_id = c.customer_id AND s.kind = 'NOTICE' AND s.channel = #{channel}
+		                    AND (s.status IN ('PENDING', 'SENDING') OR s.created_at &gt; now() - INTERVAL '30 days'))
+		ORDER BY c.customer_id
+		LIMIT #{limit}
+	</select>
+
+	<sql id="lastSentNotice">
+		(SELECT max(s.sent_at) FROM send_log s
+		 WHERE s.customer_id = c.customer_id AND s.kind = 'NOTICE' AND s.channel = #{channel}
+		   AND s.status IN ('SENT', 'BOUNCED'))
+	</sql>
+
+	<select id="findConsentHistory" resultType="com.withus.customer.domain.ConsentHistory">
+		SELECT history_id, channel, before_yn, after_yn, source, note, changed_at
+		FROM consent_history WHERE customer_id = #{customerId}
+		ORDER BY changed_at DESC, history_id DESC
+	</select>
+</mapper>
