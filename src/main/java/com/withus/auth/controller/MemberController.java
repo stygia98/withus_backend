@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.withus.auth.dto.MemberAdminResponse;
 import com.withus.auth.dto.MemberCreateRequest;
 import com.withus.auth.dto.MemberUpdateRequest;
+import com.withus.auth.dto.PasswordResetRequest;
 import com.withus.auth.security.AuthMember;
 import com.withus.auth.service.MemberService;
 import com.withus.common.response.ApiResponse;
@@ -53,5 +54,14 @@ public class MemberController {
 	public ApiResponse<MemberAdminResponse> update(@PathVariable long memberId,
 		@RequestBody MemberUpdateRequest request, @AuthenticationPrincipal AuthMember me) {
 		return ApiResponse.ok(memberService.update(memberId, request, me.memberId()));
+	}
+
+	@Operation(summary = "비밀번호 재설정", description = "새 비밀번호 8~72자(OWNER 가 정해 전달). 그 사용자의 기존 로그인은 끊기고"
+		+ " 실패 잠금도 풀린다. 기존 비밀번호는 조회할 수 없다. 자기 계정은 MEMBER_SELF_PASSWORD(400)")
+	@PostMapping("/{memberId}/password")
+	public ApiResponse<Void> resetPassword(@PathVariable long memberId,
+		@Valid @RequestBody PasswordResetRequest request, @AuthenticationPrincipal AuthMember me) {
+		memberService.resetPassword(memberId, request, me.memberId());
+		return ApiResponse.ok(null);
 	}
 }

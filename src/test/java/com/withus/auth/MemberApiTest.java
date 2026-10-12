@@ -7,6 +7,7 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -122,6 +123,85 @@ class MemberApiTest {
 			+ PASSWORD + "\"}"), Role.OWNER).andExpect(status().isBadRequest());
 	}
 
+	@Test
+	void OWNER_가_비밀번호를_재설정하면_새_비밀번호로만_로그인된다() throws Exception {
+		long id = idOf(create(email, Role.STAFF));
+		authService.login(email, PASSWORD);
+		assertThat(refreshHashOf(id)).isNotNull();
+
+		call(post("/api/v1/members/" + id + "/password").content("{\"newPassword\":\"brand-new-pass\"}"), Role.OWNER)
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.data").doesNotExist());
+
+		// 기존 로그인은 끊기고, 비밀번호는 BCrypt 해시로만 남는다
+		assertThat(refreshHashOf(id)).isNull();
+		assertThat(jdbc.queryForObject("SELECT password FROM member WHERE member_id = ?", String.class, id))
+			.startsWith("$2").doesNotContain("brand-new-pass");
+		assertThatThrownBy(() -> authService.login(email, PASSWORD)).isInstanceOf(BusinessException.class)
+			.extracting(e -> ((BusinessException) e).getErrorCode().code()).isEqualTo("AUTH_INVALID_CREDENTIALS");
+		assertThat(authService.login(email, "brand-new-pass").member().getMemberId()).isEqualTo(id);
+	}
+
+	@Test
+	void 비밀번호_재설정은_OWNER_만_하고_본인과_잘못된_입력은_거절한다() throws Exception {
+		long id = idOf(create(email, Role.STAFF));
+		String body = "{\"newPassword\":\"brand-new-pass\"}";
+
+		call(post("/api/v1/members/" + OWNER_ID + "/password").content(body), Role.OWNER)
+			.andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.error.code").value("MEMBER_SELF_PASSWORD"));
+		call(post("/api/v1/members/999999999/password").content(body), Role.OWNER).andExpect(status().isNotFound());
+		call(post("/api/v1/members/" + id + "/password").content("{\"newPassword\":\"short\"}"), Role.OWNER)
+			.andExpect(status().isBadRequest());
+		call(post("/api/v1/members/" + id + "/password").content(body), Role.MANAGER)
+			.andExpect(status().isForbidden());
+		call(post("/api/v1/members/" + id + "/password").content(body), Role.STAFF)
+			.andExpect(status().isForbidden());
+		// 거절된 요청으로는 비밀번호가 바뀌지 않는다
+		assertThat(authService.login(email, PASSWORD).member().getMemberId()).isEqualTo(id);
+	}
+
+	@Test
+	void STAFF_도_현재_비밀번호를_확인하고_내_비밀번호를_바꾼다() throws Exception {
+		long id = idOf(create(email, Role.STAFF));
+
+		callAs(id, Role.STAFF, post("/api/v1/auth/password")
+			.content("{\"currentPassword\":\"wrong-password\",\"newPassword\":\"brand-new-pass\"}"))
+			.andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.error.code").value("AUTH_CURRENT_PASSWORD_INVALID"));
+		assertThat(authService.login(email, PASSWORD).member().getMemberId()).isEqualTo(id);
+
+		callAs(id, Role.STAFF, post("/api/v1/auth/password")
+			.content("{\"currentPassword\":\"" + PASSWORD + "\",\"newPassword\":\"brand-new-pass\"}"))
+			.andExpect(status().isOk())
+			.andExpect(header().exists("Set-Cookie"));
+		assertThatThrownBy(() -> authService.login(email, PASSWORD)).isInstanceOf(BusinessException.class);
+		assertThat(authService.login(email, "brand-new-pass").member().getMemberId()).isEqualTo(id);
+
+		callAs(id, Role.STAFF, post("/api/v1/auth/password")
+			.content("{\"currentPassword\":\"brand-new-pass\",\"newPassword\":\"short\"}"))
+			.andExpect(status().isBadRequest());
+	}
+
+	@Test
+	void 현재_비밀번호를_5회_틀리면_변경이_잠긴다() throws Exception {
+		long id = idOf(create(email, Role.STAFF));
+		String wrong = "{\"currentPassword\":\"wrong-password\",\"newPassword\":\"brand-new-pass\"}";
+
+		for (int i = 0; i < 5; i++) {
+			callAs(id, Role.STAFF, post("/api/v1/auth/password").content(wrong)).andExpect(status().isBadRequest());
+		}
+		// 잠긴 뒤에는 올바른 현재 비밀번호여도 거절한다 (일정 시간 뒤 풀림)
+		callAs(id, Role.STAFF, post("/api/v1/auth/password")
+			.content("{\"currentPassword\":\"" + PASSWORD + "\",\"newPassword\":\"brand-new-pass\"}"))
+			.andExpect(status().isTooManyRequests())
+			.andExpect(jsonPath("$.error.code").value("AUTH_PASSWORD_CHANGE_LOCKED"));
+	}
+
+	private String refreshHashOf(long id) {
+		return jdbc.queryForObject("SELECT refresh_token_hash FROM member WHERE member_id = ?", String.class, id);
+	}
+
 	private ResultActions create(String email, Role role) throws Exception {
 		return call(post("/api/v1/members").content(body(email, role, PASSWORD)), Role.OWNER);
 	}
@@ -131,7 +211,11 @@ class MemberApiTest {
 	}
 
 	private ResultActions call(MockHttpServletRequestBuilder request, Role role) throws Exception {
-		var auth = new UsernamePasswordAuthenticationToken(new AuthMember(OWNER_ID, role), null,
+		return callAs(OWNER_ID, role, request);
+	}
+
+	private ResultActions callAs(long memberId, Role role, MockHttpServletRequestBuilder request) throws Exception {
+		var auth = new UsernamePasswordAuthenticationToken(new AuthMember(memberId, role), null,
 			List.of(new SimpleGrantedAuthority("ROLE_" + role.name())));
 		return mvc.perform(request.contentType(MediaType.APPLICATION_JSON).with(authentication(auth)).with(csrf()));
 	}

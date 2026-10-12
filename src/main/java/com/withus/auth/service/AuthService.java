@@ -86,6 +86,27 @@ public class AuthService {
 		return new Tokens(member, jwtProvider.createAccessToken(memberId, member.getRole()), newRefresh);
 	}
 
+	/**
+	 * 내 비밀번호 변경. 현재 비밀번호를 5회 틀리면 로그인과 같은 카운터로 5분 잠근다.
+	 * 바꾸면 Refresh 가 교체되므로 다른 기기의 로그인은 끊기고, 호출한 이 세션만 새 토큰으로 이어진다
+	 */
+	public Tokens changePassword(long memberId, String currentPassword, String newPassword) {
+		Member member = me(memberId);
+		if (member.isLocked(OffsetDateTime.now())) {
+			throw new BusinessException(AuthErrorCode.AUTH_PASSWORD_CHANGE_LOCKED,
+				AuthErrorCode.AUTH_PASSWORD_CHANGE_LOCKED.message(),
+				Map.of("lockedUntil", member.getLockedUntil().toString()));
+		}
+		if (!passwordEncoder.matches(currentPassword, member.getPassword())) {
+			memberMapper.recordLoginFailure(memberId);
+			throw new BusinessException(AuthErrorCode.AUTH_CURRENT_PASSWORD_INVALID);
+		}
+		memberMapper.updatePassword(memberId, passwordEncoder.encode(newPassword));
+		String refreshToken = jwtProvider.createRefreshToken(memberId);
+		memberMapper.recordLoginSuccess(memberId, JwtProvider.hash(refreshToken));
+		return new Tokens(member, jwtProvider.createAccessToken(memberId, member.getRole()), refreshToken);
+	}
+
 	public void logout(long memberId) {
 		memberMapper.clearRefreshToken(memberId);
 	}
