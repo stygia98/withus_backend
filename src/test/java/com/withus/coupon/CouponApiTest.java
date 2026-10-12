@@ -208,6 +208,29 @@ class CouponApiTest {
 			.andExpect(jsonPath("$.data[0].couponId").value(couponId));
 	}
 
+	@Test
+	void 발급_목록은_입력_순서가_아니라_발급_시각_최신순이다() throws Exception {
+		long couponId = createCoupon(body("AMOUNT", 5000, null, TODAY, TODAY.plusDays(30)));
+		long otherCouponId = createCoupon(body("AMOUNT", 3000, null, TODAY, TODAY.plusDays(30)));
+		long older = customer("먼저입력");
+		long newer = customer("나중발급");
+		// 먼저 입력한 건(issue_id 작음)의 발급 시각을 더 늦게 둔다 (시드처럼 과거 시각으로 넣은 경우)
+		String first = issue(couponId, newer);
+		issue(couponId, older);
+		String otherFirst = issue(otherCouponId, newer);
+		jdbc.update("UPDATE coupon_issue SET issued_at = now() - INTERVAL '1 day' WHERE customer_id = ?", older);
+		jdbc.update("UPDATE coupon_issue SET issued_at = now() - INTERVAL '2 day' WHERE token = CAST(? AS uuid)", otherFirst);
+		jdbc.update("UPDATE coupon_issue SET issued_at = now() WHERE token = CAST(? AS uuid)", first);
+
+		mvc.perform(get("/api/v1/coupons/" + couponId + "/issues").cookie(access))
+			.andExpect(jsonPath("$.data.content[0].customerName").value("나중발급"))
+			.andExpect(jsonPath("$.data.content[1].customerName").value("먼저입력"));
+
+		mvc.perform(get("/api/v1/customers/" + newer + "/coupon-issues").cookie(access))
+			.andExpect(jsonPath("$.data[0].couponId").value(couponId))
+			.andExpect(jsonPath("$.data[1].couponId").value(otherCouponId));
+	}
+
 	// ---- 고객 공개 API (인증·CSRF 없음) ----
 
 	@Test
