@@ -5,6 +5,7 @@ import java.time.OffsetDateTime;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -127,6 +128,15 @@ public class CampaignController {
 	@PostMapping("/{campaignId}/resume")
 	public ApiResponse<CampaignResponse> resume(@PathVariable long campaignId) {
 		return ApiResponse.ok(CampaignResponse.from(campaignService.resume(campaignId)));
+	}
+
+	@Operation(summary = "삭제", description = "DRAFT 만 삭제한다(예약은 먼저 취소). 워크플로우 노드·A/B 설정은 함께 지워진다. "
+		+ "그 외 상태이거나 발송 기록이 있으면 CAMPAIGN_INVALID_STATUS(409), 없으면 CAMPAIGN_NOT_FOUND(404).")
+	@PreAuthorize("hasAnyRole('OWNER','MANAGER')")
+	@DeleteMapping("/{campaignId}")
+	public ApiResponse<Void> delete(@PathVariable long campaignId) {
+		campaignService.delete(campaignId);
+		return ApiResponse.ok(null);
 	}
 
 	@Operation(summary = "복제", description = "새 DRAFT 로 복제한다. 워크플로우는 구조(노드)까지 복사하고 인스턴스·발송 이력은 복사하지 않는다.")

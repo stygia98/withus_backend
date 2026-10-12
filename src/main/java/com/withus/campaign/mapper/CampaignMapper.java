@@ -29,6 +29,13 @@ public interface CampaignMapper {
 	/** DRAFT 일 때만 바뀐다(수정 요청이 시작 요청과 겹쳐도 실행 중인 캠페인의 참조가 바뀌지 않게, PR #31 리뷰). @return 바뀐 행 수 */
 	int update(Campaign campaign);
 
+	/**
+	 * DRAFT 이고 시작 선점 중이 아닐 때만 지운다(삭제가 시작 요청과 겹쳐도 적재 중인 캠페인이 사라지지 않게).
+	 * workflow_step·ab_test 는 ON DELETE CASCADE 로 함께 지워지고, send_log·workflow_instance·ai_report 가 참조하면
+	 * FK 위반(DataIntegrityViolationException)으로 막힌다. @return 지운 행 수
+	 */
+	int deleteDraft(@Param("campaignId") long campaignId);
+
 	/** 세그먼트 존재 확인(segment 테이블 SELECT) — 없는 ID 가 FK 오류(500)로 새는 걸 막는다 */
 	boolean existsSegment(@Param("segmentId") long segmentId);
 

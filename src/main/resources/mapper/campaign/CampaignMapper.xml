@@ -49,6 +49,12 @@
 		WHERE campaign_id = #{campaignId} AND status = 'DRAFT'
 	</update>
 
+	<delete id="deleteDraft">
+		DELETE FROM campaign
+		WHERE campaign_id = #{campaignId} AND status = 'DRAFT'
+		  AND (start_claimed_at IS NULL OR start_claimed_at &lt; now() - interval '10 minutes')
+	</delete>
+
 	<select id="existsCoupon" resultType="boolean">
 		SELECT EXISTS (SELECT 1 FROM coupon WHERE coupon_id = #{couponId})
 	</select>
