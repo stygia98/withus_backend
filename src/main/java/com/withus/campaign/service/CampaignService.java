@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.regex.Pattern;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -140,6 +141,34 @@ public class CampaignService {
 		}
 		sendLogMapper.deleteUnstartedCampaignPending(campaignId); // 세그먼트·템플릿이 바뀌었을 수 있어 옛 적재분을 치운다
 		return existing;
+	}
+
+	/**
+	 * DRAFT 캠페인 삭제. 시작·예약했던 캠페인의 발송 이력은 통계와 법규상 기록이라 지우지 않는다 —
+	 * SCHEDULED 는 먼저 예약을 취소해 DRAFT 로 되돌려야 하고, ACTIVE·PAUSED·COMPLETED 는 삭제할 수 없다.
+	 * 워크플로우 노드·A/B 설정은 함께 지워진다(FK CASCADE)
+	 */
+	public void delete(long campaignId) {
+		Campaign campaign = getOrThrow(campaignId);
+		if (campaign.getStatus() != CampaignStatus.DRAFT) {
+			throw new BusinessException(CampaignErrorCode.CAMPAIGN_INVALID_STATUS,
+				"DRAFT 상태의 캠페인만 삭제할 수 있습니다. 예약은 먼저 취소하고, 진행·종료된 캠페인은 발송 기록 보존을 위해 삭제할 수 없습니다.",
+				null);
+		}
+		sendLogMapper.deleteUnstartedCampaignPending(campaignId); // 시작이 실패해 남은 적재분은 FK 가 막으므로 먼저 치운다
+		int deleted;
+		try {
+			deleted = campaignMapper.deleteDraft(campaignId);
+		} catch (DataIntegrityViolationException e) {
+			// 처리된 발송 기록·워크플로우 인스턴스·AI 리포트가 이 캠페인을 참조한다
+			throw new BusinessException(CampaignErrorCode.CAMPAIGN_INVALID_STATUS,
+				"발송 기록이 있어 삭제할 수 없습니다.", null);
+		}
+		if (deleted == 0) {
+			// 읽은 뒤 시작·예약 요청이 끼어들어 DRAFT 가 아니게 됐거나 시작 중이다
+			throw new BusinessException(CampaignErrorCode.CAMPAIGN_INVALID_STATUS,
+				"DRAFT 상태의 캠페인만 삭제할 수 있습니다.", null);
+		}
 	}
 
 	/** DB_SCHEMA ck_campaign_type_fields 를 저장 전에 먼저 걸러 친절한 400 으로 돌려준다 */
