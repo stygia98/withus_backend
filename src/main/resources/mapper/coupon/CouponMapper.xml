@@ -101,7 +101,7 @@
 	<select id="findIssuesByCoupon" resultType="com.withus.coupon.domain.CouponIssueRow">
 		SELECT <include refid="issueColumns"/> <include refid="issueFrom"/>
 		WHERE i.coupon_id = #{couponId}
-		ORDER BY i.issue_id DESC
+		ORDER BY i.issued_at DESC, i.issue_id DESC
 		LIMIT #{limit} OFFSET #{offset}
 	</select>
 
@@ -116,6 +116,6 @@
 		  AND i.used_at IS NULL
 		  AND #{usableOn} BETWEEN c.valid_from AND c.valid_to
 		</if>
-		ORDER BY i.issue_id DESC
+		ORDER BY i.issued_at DESC, i.issue_id DESC
 	</select>
 </mapper>
