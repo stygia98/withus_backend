@@ -45,6 +45,9 @@ public interface CouponMapper {
 	/** 매장 바코드 사용 처리: 미사용이고 today 가 유효기간 안일 때만 사용 처리한다. 바뀐 행 수(0 또는 1) */
 	int markUsedByCode(@Param("code") String code, @Param("today") LocalDate today);
 
+	/** 매장 바코드 사용 취소: 사용했고 구매 등록에 묶이지 않았을 때만 되돌린다. 바뀐 행 수(0 또는 1) */
+	int cancelUseByCode(@Param("code") String code);
+
 	CouponIssueRow findIssueById(@Param("issueId") long issueId);
 
 	CouponIssueRow findIssueByToken(@Param("token") String token);

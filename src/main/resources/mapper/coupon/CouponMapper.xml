@@ -78,6 +78,14 @@
 		WHERE i.code = #{code} AND <include refid="usableCondition"/>
 	</update>
 
+	<!-- 사용 처리와 같이 조건을 한 문장에 둔다(두 번 눌러도 한 번만 성공). 구매 등록(purchase)으로 쓴 쿠폰은
+	     금액·누적구매액이 함께 기록돼 있어 여기서 되돌리지 않는다 -->
+	<update id="cancelUseByCode">
+		UPDATE coupon_issue i SET used_at = NULL, updated_at = now()
+		WHERE i.code = #{code} AND i.used_at IS NOT NULL
+		  AND NOT EXISTS (SELECT 1 FROM purchase p WHERE p.coupon_issue_id = i.issue_id)
+	</update>
+
 	<sql id="issueColumns">
 		i.issue_id, i.code, i.coupon_id, i.customer_id, cu.name AS customer_name, i.send_log_id, i.issued_at, i.used_at,
 		c.name AS coupon_name, c.discount_type, c.discount_value, c.max_discount_amount, c.valid_from, c.valid_to
