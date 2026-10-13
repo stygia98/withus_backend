@@ -32,8 +32,8 @@ import com.withus.auth.security.AuthCookies;
 import jakarta.servlet.http.Cookie;
 
 /**
- * 쿠폰 관리 API(API_SPEC 7장)와 고객 쿠폰 공개 API(8장). 로컬 Docker DB, 테스트마다 롤백
- * PRD 10.3: "메일로 받은 쿠폰을 /c/[token]에서 확인하고, 사용 처리하면 전환율에 반영된다" 의 백엔드 부분
+ * 쿠폰 관리 API(API_SPEC 7장), 고객 쿠폰 공개 API와 매장 바코드 사용 처리(8장). 로컬 Docker DB, 테스트마다 롤백
+ * PRD 10.3: "메일로 받은 쿠폰을 /c/[token]에서 확인하고, 매장에서 바코드로 사용 처리하면 전환율에 반영된다" 의 백엔드 부분
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -231,43 +231,104 @@ class CouponApiTest {
 			.andExpect(jsonPath("$.data[1].couponId").value(otherCouponId));
 	}
 
-	// ---- 고객 공개 API (인증·CSRF 없음) ----
+	// ---- 고객 공개 API (인증·CSRF 없음, 조회만) ----
+
+	private String codeOf(String token) {
+		return jdbc.queryForObject("SELECT code FROM coupon_issue WHERE token = CAST(? AS uuid)", String.class, token);
+	}
 
 	@Test
-	void 고객_카드는_이름을_마스킹하고_조회로는_상태가_바뀌지_않는다() throws Exception {
+	void 고객_카드는_이름을_마스킹하고_바코드용_쿠폰_번호를_주며_조회로는_상태가_바뀌지_않는다() throws Exception {
 		long couponId = createCoupon(body("AMOUNT", 5000, null, TODAY, TODAY.plusDays(30)));
 		String token = issue(couponId, customer("김민지"));
 
 		for (int i = 0; i < 2; i++) {
 			mvc.perform(get("/api/v1/public/coupons/" + token))
 				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.code").value(codeOf(token)))
 				.andExpect(jsonPath("$.data.customerName").value("김**"))
 				.andExpect(jsonPath("$.data.couponName").value("가을 감사 쿠폰"))
 				.andExpect(jsonPath("$.data.status").value("USABLE"));
 		}
+		assertThat(codeOf(token)).matches("\\d{12}");
 		assertThat(jdbc.queryForObject("SELECT used_at IS NULL FROM coupon_issue WHERE token = CAST(? AS uuid)",
 			Boolean.class, token)).isTrue();
 	}
 
 	@Test
-	void 사용하기는_POST로_한_번만_되고_전환으로_기록된다() throws Exception {
+	void 발급마다_쿠폰_번호가_다르다() throws Exception {
+		long couponId = createCoupon(body("AMOUNT", 5000, null, TODAY, TODAY.plusDays(30)));
+		long customerId = customer("정");
+		String a = codeOf(issue(couponId, customerId));
+		String b = codeOf(issue(couponId, customerId));
+		assertThat(a).isNotEqualTo(b);
+	}
+
+	@Test
+	void 고객_화면에서는_사용_처리할_수_없다() throws Exception {
+		long couponId = createCoupon(body("AMOUNT", 5000, null, TODAY, TODAY.plusDays(30)));
+		String token = issue(couponId, customer("최"));
+
+		mvc.perform(post("/api/v1/public/coupons/" + token + "/use")).andExpect(status().is4xxClientError());
+		assertThat(jdbc.queryForObject("SELECT used_at IS NULL FROM coupon_issue WHERE token = CAST(? AS uuid)",
+			Boolean.class, token)).isTrue();
+	}
+
+	@Test
+	void 없는_토큰이나_형식이_틀린_토큰은_404() throws Exception {
+		mvc.perform(get("/api/v1/public/coupons/" + UUID.randomUUID()))
+			.andExpect(status().isNotFound())
+			.andExpect(jsonPath("$.error.code").value("COUPON_NOT_FOUND"));
+		mvc.perform(get("/api/v1/public/coupons/not-a-uuid"))
+			.andExpect(status().isNotFound());
+	}
+
+	// ---- 매장 바코드 사용 처리 (OWNER·MANAGER) ----
+
+	private ResultActions redeem(String code, Cookie auth) throws Exception {
+		return mvc.perform(post("/api/v1/coupon-issues/by-code/" + code + "/use").cookie(auth, xsrf)
+			.header("X-XSRF-TOKEN", xsrf.getValue()));
+	}
+
+	@Test
+	void 바코드_사용_처리는_한_번만_되고_전환으로_기록된다() throws Exception {
 		long couponId = createCoupon(body("RATE", 15, 30000, TODAY, TODAY.plusDays(30)));
 		String token = issue(couponId, customer("이서준"));
+		String code = codeOf(token);
 
-		mvc.perform(post("/api/v1/public/coupons/" + token + "/use"))
+		// 조회는 상태를 바꾸지 않는다
+		mvc.perform(get("/api/v1/coupon-issues/by-code/" + code).cookie(access))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.data.customerName").value("이**"))
+			.andExpect(jsonPath("$.data.status").value("USABLE"))
+			.andExpect(jsonPath("$.data.usedAt").value(nullValue()));
+
+		redeem(code, access)
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.data.status").value("USED"));
-		mvc.perform(post("/api/v1/public/coupons/" + token + "/use"))
+		redeem(code, access)
 			.andExpect(status().isConflict())
 			.andExpect(jsonPath("$.error.code").value("COUPON_ALREADY_USED"));
 
 		mvc.perform(get("/api/v1/coupons/" + couponId).cookie(access))
 			.andExpect(jsonPath("$.data.usedCount").value(1));
+		mvc.perform(get("/api/v1/public/coupons/" + token)).andExpect(jsonPath("$.data.status").value("USED"));
 		// purchase 는 만들지 않는다 (금액이 없는 경로)
 		assertThat(jdbc.queryForObject("""
 			SELECT count(*) FROM purchase p JOIN coupon_issue i ON i.issue_id = p.coupon_issue_id
 			WHERE i.token = CAST(? AS uuid)
 			""", Long.class, token)).isZero();
+	}
+
+	@Test
+	void 직원이_손으로_친_공백과_하이픈은_무시한다() throws Exception {
+		long couponId = createCoupon(body("AMOUNT", 5000, null, TODAY, TODAY.plusDays(30)));
+		String code = codeOf(issue(couponId, customer("한")));
+		String typed = code.substring(0, 4) + " " + code.substring(4, 8) + "-" + code.substring(8);
+
+		mvc.perform(get("/api/v1/coupon-issues/by-code/" + typed).cookie(access))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.data.code").value(code));
 	}
 
 	@Test
@@ -278,17 +339,28 @@ class CouponApiTest {
 		mvc.perform(get("/api/v1/public/coupons/" + token))
 			.andExpect(jsonPath("$.data.status").value("NOT_STARTED"))
 			.andExpect(jsonPath("$.data.customerName").value("박"));
-		mvc.perform(post("/api/v1/public/coupons/" + token + "/use"))
+		redeem(codeOf(token), access)
 			.andExpect(status().isUnprocessableContent())
 			.andExpect(jsonPath("$.error.code").value("COUPON_NOT_USABLE"));
 	}
 
 	@Test
-	void 없는_토큰이나_형식이_틀린_토큰은_404() throws Exception {
-		mvc.perform(get("/api/v1/public/coupons/" + UUID.randomUUID()))
+	void 없는_번호나_형식이_틀린_번호는_404() throws Exception {
+		mvc.perform(get("/api/v1/coupon-issues/by-code/000000000000").cookie(access))
 			.andExpect(status().isNotFound())
 			.andExpect(jsonPath("$.error.code").value("COUPON_NOT_FOUND"));
-		mvc.perform(post("/api/v1/public/coupons/not-a-uuid/use"))
-			.andExpect(status().isNotFound());
+		redeem("12345", access).andExpect(status().isNotFound());
+	}
+
+	@Test
+	void STAFF와_로그인하지_않은_요청은_사용_처리할_수_없다() throws Exception {
+		long couponId = createCoupon(body("AMOUNT", 5000, null, TODAY, TODAY.plusDays(30)));
+		String code = codeOf(issue(couponId, customer("윤")));
+
+		redeem(code, login(Role.STAFF)).andExpect(status().isForbidden());
+		mvc.perform(post("/api/v1/coupon-issues/by-code/" + code + "/use").cookie(xsrf)
+			.header("X-XSRF-TOKEN", xsrf.getValue())).andExpect(status().isUnauthorized());
+		assertThat(jdbc.queryForObject("SELECT used_at IS NULL FROM coupon_issue WHERE code = ?", Boolean.class, code))
+			.isTrue();
 	}
 }

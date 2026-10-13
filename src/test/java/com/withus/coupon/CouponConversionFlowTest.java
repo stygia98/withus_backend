@@ -104,7 +104,7 @@ class CouponConversionFlowTest {
 	}
 
 	@Test
-	void 고객_사용하기와_관리자_구매_등록이_캠페인_전환율에_반영된다() throws Exception {
+	void 매장_바코드_사용과_관리자_구매_등록이_캠페인_전환율에_반영된다() throws Exception {
 		Received byCustomer = sentWithCoupon();
 		Received byPurchase = sentWithCoupon();
 		sentWithCoupon(); // 쓰지 않은 고객
@@ -116,9 +116,12 @@ class CouponConversionFlowTest {
 			.andExpect(jsonPath("$.data.kpi.sent").value(3))
 			.andExpect(jsonPath("$.data.kpi.couponUsed").value(0));
 
-		// ① 고객 페이지 '사용하기'(POST) — 한 번만 된다
-		mvc.perform(post("/api/v1/public/coupons/" + token + "/use")).andExpect(status().isOk());
-		mvc.perform(post("/api/v1/public/coupons/" + token + "/use")).andExpect(status().isConflict());
+		// ① 매장 직원이 고객 화면의 바코드를 찍어 사용 처리(POST) — 한 번만 된다
+		String code = jdbc.queryForObject("SELECT code FROM coupon_issue WHERE token = CAST(? AS uuid)", String.class,
+			token);
+		String redeem = "/api/v1/coupon-issues/by-code/" + code + "/use";
+		mvc.perform(post(redeem).with(manager()).with(csrf)).andExpect(status().isOk());
+		mvc.perform(post(redeem).with(manager()).with(csrf)).andExpect(status().isConflict());
 
 		// ② 관리자 구매 등록에서 쿠폰 선택 (팀원1 → CouponService.markUsed)
 		long issueId = jdbc.queryForObject("SELECT issue_id FROM coupon_issue WHERE send_log_id = ?", Long.class,
