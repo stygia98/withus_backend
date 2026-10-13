@@ -26,8 +26,8 @@ public interface CouponService {
 	 * 구매 등록 시 발급 쿠폰을 사용 처리한다. 미사용인지만 원자적으로 확인한다.
 	 *
 	 * <p><b>유효기간은 호출하는 쪽이 판정한다.</b> 구매 등록은 오늘이 아니라 구매일 기준으로 기간을 보므로
-	 * (PRD F-10 ①, 팀원1 PurchaseService), 이 메서드는 기간을 검사하지 않는다. 고객 사용하기(/c/[token])는
-	 * 오늘 기준으로 따로 검사한다. 고객 일치 확인도 호출하는 쪽이 한다.
+	 * (PRD F-10 ①, 팀원1 PurchaseService), 이 메서드는 기간을 검사하지 않는다. 매장 바코드 사용 처리(F-10 ②,
+	 * CouponRedeemService)는 오늘 기준으로 따로 검사한다. 고객 일치 확인도 호출하는 쪽이 한다.
 	 *
 	 * @throws com.withus.common.exception.BusinessException COUPON_ALREADY_USED(409) 이미 사용,
 	 *                                                       COUPON_NOT_FOUND(404) 없는 발급
