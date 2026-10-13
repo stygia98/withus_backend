@@ -99,7 +99,7 @@ public class WorkflowValidator {
 			checks.add(new WorkflowCheck("ALL_NODES_REACHABLE", unreachable.isEmpty(),
 				unreachable.isEmpty() ? "모든 노드가 TRIGGER 에서 닿음" : "TRIGGER 에서 닿지 않는 노드: " + unreachable));
 			walk.openedConditions.forEach(id -> warnings.add(new WorkflowWarning("EMAIL_OPENED_UNRELIABLE",
-				id + ": 열람 조건 대신 클릭 조건 사용을 권장합니다.")));
+				id + ": 열람 조건 대신 클릭 조건 사용을 권장해요.")));
 		} else {
 			for (String code : List.of("NO_CYCLE", "DEPTH_WITHIN_LIMIT", "ALL_PATHS_END_WITH_END",
 				"EMAIL_EVENT_REQUIRES_SEND_WAIT", "ALL_NODES_REACHABLE")) {

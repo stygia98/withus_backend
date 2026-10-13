@@ -55,13 +55,13 @@ public class GlobalExceptionHandler {
 	/** 필수 @RequestParam 누락: 메시지에는 빠진 파라미터 이름만 넣는다 (사용자 입력값은 넣지 않음) */
 	@ExceptionHandler(MissingServletRequestParameterException.class)
 	public ResponseEntity<ApiResponse<Void>> handleMissingParameter(MissingServletRequestParameterException e) {
-		return toResponse(CommonErrorCode.COMMON_INVALID_INPUT, "필수 요청 값이 없습니다: " + e.getParameterName(), null);
+		return toResponse(CommonErrorCode.COMMON_INVALID_INPUT, "필수 요청 값이 없어요: " + e.getParameterName(), null);
 	}
 
 	/** multipart 요청에 필수 파트(예: 업로드의 file)가 없음: 메시지에는 파트 이름만 넣는다 */
 	@ExceptionHandler(MissingServletRequestPartException.class)
 	public ResponseEntity<ApiResponse<Void>> handleMissingPart(MissingServletRequestPartException e) {
-		return toResponse(CommonErrorCode.COMMON_INVALID_INPUT, "필수 요청 값이 없습니다: " + e.getRequestPartName(), null);
+		return toResponse(CommonErrorCode.COMMON_INVALID_INPUT, "필수 요청 값이 없어요: " + e.getRequestPartName(), null);
 	}
 
 	/**

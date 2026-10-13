@@ -41,7 +41,7 @@ public class FileController {
 	@PostMapping("/images")
 	public ApiResponse<FileUploadResponse> uploadImage(@RequestParam("file") MultipartFile file) throws IOException {
 		if (file.isEmpty()) {
-			throw new BusinessException(CommonErrorCode.COMMON_INVALID_INPUT, "파일이 비어 있습니다.", null);
+			throw new BusinessException(CommonErrorCode.COMMON_INVALID_INPUT, "파일이 비어 있어요.", null);
 		}
 		if (file.getSize() > MAX_IMAGE_SIZE) {
 			throw new BusinessException(FileErrorCode.UPLOAD_FILE_TOO_LARGE);

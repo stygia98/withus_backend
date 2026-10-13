@@ -4,11 +4,11 @@ import org.springframework.http.HttpStatus;
 
 public enum CommonErrorCode implements ErrorCode {
 
-	COMMON_INVALID_INPUT(HttpStatus.BAD_REQUEST, "요청 값이 올바르지 않습니다."),
-	COMMON_NOT_FOUND(HttpStatus.NOT_FOUND, "대상을 찾을 수 없습니다."),
+	COMMON_INVALID_INPUT(HttpStatus.BAD_REQUEST, "요청 값이 올바르지 않아요."),
+	COMMON_NOT_FOUND(HttpStatus.NOT_FOUND, "대상을 찾을 수 없어요."),
 	/** multipart 한도(spring.servlet.multipart.max-file-size) 초과. 도메인별 한도(이미지 5MB 등)는 각 서비스가 같은 코드로 검사한다 */
-	UPLOAD_FILE_TOO_LARGE(HttpStatus.BAD_REQUEST, "파일 크기가 허용 한도를 초과했습니다."),
-	COMMON_INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "일시적인 오류가 발생했습니다.");
+	UPLOAD_FILE_TOO_LARGE(HttpStatus.BAD_REQUEST, "파일 크기가 허용 한도를 초과했어요."),
+	COMMON_INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "일시적인 오류가 발생했어요.");
 
 	private final HttpStatus status;
 	private final String message;

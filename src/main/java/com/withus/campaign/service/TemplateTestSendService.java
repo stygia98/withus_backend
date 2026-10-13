@@ -38,7 +38,7 @@ public class TemplateTestSendService {
 		if (channel == Channel.EMAIL) {
 			String email = Emails.normalize(recipient);
 			if (!EMAIL.matcher(email).matches()) {
-				throw new BusinessException(CommonErrorCode.COMMON_INVALID_INPUT, "이메일 형식이 올바르지 않습니다.", null);
+				throw new BusinessException(CommonErrorCode.COMMON_INVALID_INPUT, "이메일 형식이 올바르지 않아요.", null);
 			}
 			return email;
 		}

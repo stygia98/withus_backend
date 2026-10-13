@@ -46,7 +46,7 @@ class GlobalExceptionHandlerTest {
 
 		assertThat(res.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
 		assertThat(res.getBody().error().code()).isEqualTo("COMMON_INVALID_INPUT");
-		assertThat(res.getBody().error().message()).isEqualTo("필수 요청 값이 없습니다: targetCount");
+		assertThat(res.getBody().error().message()).isEqualTo("필수 요청 값이 없어요: targetCount");
 	}
 
 	@Test
@@ -55,7 +55,7 @@ class GlobalExceptionHandlerTest {
 
 		assertThat(res.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
 		assertThat(res.getBody().error().code()).isEqualTo("COMMON_INVALID_INPUT");
-		assertThat(res.getBody().error().message()).isEqualTo("필수 요청 값이 없습니다: file");
+		assertThat(res.getBody().error().message()).isEqualTo("필수 요청 값이 없어요: file");
 	}
 
 	@Test
@@ -67,7 +67,7 @@ class GlobalExceptionHandlerTest {
 
 		assertThat(header.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
 		assertThat(cookie.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
-		assertThat(header.getBody().error().message()).isEqualTo("요청 값이 올바르지 않습니다.");
+		assertThat(header.getBody().error().message()).isEqualTo("요청 값이 올바르지 않아요.");
 	}
 
 	@Test
