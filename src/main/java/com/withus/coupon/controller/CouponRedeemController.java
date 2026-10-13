@@ -41,4 +41,13 @@ public class CouponRedeemController {
 	public ApiResponse<CouponRedeemResponse> use(@PathVariable String code) {
 		return ApiResponse.ok(CouponRedeemResponse.from(couponRedeemService.use(code), couponRedeemService.today()));
 	}
+
+	@Operation(summary = "쿠폰 사용 취소",
+		description = "매장에서 잘못 찍은 사용 처리를 되돌린다(used_at 을 비움, 전환 집계에서도 빠짐). 사용하지 않은 쿠폰 COUPON_NOT_USED(409), "
+			+ "구매 등록으로 사용한 쿠폰 COUPON_USED_BY_PURCHASE(409), 없는 번호 COUPON_NOT_FOUND(404).")
+	@PostMapping("/cancel-use")
+	public ApiResponse<CouponRedeemResponse> cancelUse(@PathVariable String code) {
+		return ApiResponse.ok(
+			CouponRedeemResponse.from(couponRedeemService.cancelUse(code), couponRedeemService.today()));
+	}
 }

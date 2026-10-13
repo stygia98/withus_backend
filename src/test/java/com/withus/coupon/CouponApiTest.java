@@ -363,4 +363,59 @@ class CouponApiTest {
 		assertThat(jdbc.queryForObject("SELECT used_at IS NULL FROM coupon_issue WHERE code = ?", Boolean.class, code))
 			.isTrue();
 	}
+
+	// ---- 매장 바코드 사용 취소 ----
+
+	private ResultActions cancelUse(String code, Cookie auth) throws Exception {
+		return mvc.perform(post("/api/v1/coupon-issues/by-code/" + code + "/cancel-use").cookie(auth, xsrf)
+			.header("X-XSRF-TOKEN", xsrf.getValue()));
+	}
+
+	@Test
+	void 바코드_사용을_취소하면_다시_쓸_수_있고_사용_수에서_빠진다() throws Exception {
+		long couponId = createCoupon(body("AMOUNT", 5000, null, TODAY, TODAY.plusDays(30)));
+		String code = codeOf(issue(couponId, customer("송")));
+		redeem(code, access).andExpect(status().isOk());
+
+		cancelUse(code, access)
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.data.status").value("USABLE"))
+			.andExpect(jsonPath("$.data.usedAt").value(nullValue()));
+		mvc.perform(get("/api/v1/coupons/" + couponId).cookie(access))
+			.andExpect(jsonPath("$.data.usedCount").value(0));
+
+		// 두 번째 취소는 사용 전 상태라 409, 다시 사용 처리는 된다
+		cancelUse(code, access)
+			.andExpect(status().isConflict())
+			.andExpect(jsonPath("$.error.code").value("COUPON_NOT_USED"));
+		redeem(code, access).andExpect(status().isOk());
+	}
+
+	@Test
+	void 구매_등록으로_쓴_쿠폰은_취소할_수_없다() throws Exception {
+		long couponId = createCoupon(body("AMOUNT", 5000, null, TODAY, TODAY.plusDays(30)));
+		long customerId = customer("문");
+		String code = codeOf(issue(couponId, customerId));
+		jdbc.update("UPDATE coupon_issue SET used_at = now() WHERE code = ?", code);
+		jdbc.update("""
+			INSERT INTO purchase (customer_id, amount, coupon_issue_id, created_by)
+			SELECT ?, 30000, issue_id, (SELECT min(member_id) FROM member) FROM coupon_issue WHERE code = ?
+			""", customerId, code);
+
+		cancelUse(code, access)
+			.andExpect(status().isConflict())
+			.andExpect(jsonPath("$.error.code").value("COUPON_USED_BY_PURCHASE"));
+		assertThat(jdbc.queryForObject("SELECT used_at IS NOT NULL FROM coupon_issue WHERE code = ?", Boolean.class,
+			code)).isTrue();
+	}
+
+	@Test
+	void STAFF는_사용_취소할_수_없고_없는_번호는_404() throws Exception {
+		long couponId = createCoupon(body("AMOUNT", 5000, null, TODAY, TODAY.plusDays(30)));
+		String code = codeOf(issue(couponId, customer("류")));
+		redeem(code, access).andExpect(status().isOk());
+
+		cancelUse(code, login(Role.STAFF)).andExpect(status().isForbidden());
+		cancelUse("000000000000", access).andExpect(status().isNotFound());
+	}
 }

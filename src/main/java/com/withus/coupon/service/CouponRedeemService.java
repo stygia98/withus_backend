@@ -58,6 +58,26 @@ public class CouponRedeemService {
 		return couponMapper.findIssueByCode(normalized);
 	}
 
+	/**
+	 * 매장에서 잘못 찍은 사용 처리를 되돌린다. 바코드로 쓴 쿠폰만 — 구매 등록으로 쓴 쿠폰은 금액이 함께 기록돼 409.
+	 * 되돌리면 전환 집계(used_at 기준)에서도 빠진다.
+	 */
+	@Transactional
+	public CouponIssueRow cancelUse(String code) {
+		String normalized = normalize(code);
+		if (couponMapper.cancelUseByCode(normalized) == 0) {
+			CouponIssueRow issue = couponMapper.findIssueByCode(normalized);
+			if (issue == null) {
+				throw new BusinessException(CouponErrorCode.COUPON_NOT_FOUND);
+			}
+			if (issue.getUsedAt() == null) {
+				throw new BusinessException(CouponErrorCode.COUPON_NOT_USED);
+			}
+			throw new BusinessException(CouponErrorCode.COUPON_USED_BY_PURCHASE);
+		}
+		return couponMapper.findIssueByCode(normalized);
+	}
+
 	/** 형식이 틀린 번호는 DB 조회 없이 '없는 쿠폰'으로 처리한다 */
 	static String normalize(String code) {
 		String digits = code == null ? "" : code.replaceAll("[\\s-]", "");
