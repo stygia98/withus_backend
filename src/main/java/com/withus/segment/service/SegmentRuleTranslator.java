@@ -36,7 +36,7 @@ public final class SegmentRuleTranslator {
 	/** today 는 상대 조건(IN_LAST_DAYS)의 기준일 */
 	public static SegmentQuery translate(JsonNode rule, LocalDate today) {
 		if (rule == null || !rule.isObject()) {
-			throw invalid("", "규칙은 객체여야 합니다.");
+			throw invalid("", "규칙은 객체여야 해요.");
 		}
 		LogicalOperator operator = logical(rule.get("operator"), "operator");
 		JsonNode groups = rule.get("groups");
@@ -62,15 +62,15 @@ public final class SegmentRuleTranslator {
 
 	private static Group group(JsonNode g, String path, LocalDate today) {
 		if (!g.isObject()) {
-			throw invalid(path, "그룹은 객체여야 합니다.");
+			throw invalid(path, "그룹은 객체여야 해요.");
 		}
 		if (g.has("groups")) {
-			throw invalid(path, "그룹은 1단계까지만 만들 수 있습니다.");
+			throw invalid(path, "그룹은 1단계까지만 만들 수 있어요.");
 		}
 		LogicalOperator operator = logical(g.get("operator"), path + ".operator");
 		JsonNode conditions = g.get("conditions");
 		if (conditions == null || !conditions.isArray() || conditions.isEmpty()) {
-			throw invalid(path, "빈 그룹은 만들 수 없습니다.");
+			throw invalid(path, "빈 그룹은 만들 수 없어요.");
 		}
 		List<Condition> result = new ArrayList<>();
 		for (int ci = 0; ci < conditions.size(); ci++) {
@@ -81,15 +81,15 @@ public final class SegmentRuleTranslator {
 
 	private static Condition condition(JsonNode c, String path, LocalDate today) {
 		if (!c.isObject()) {
-			throw invalid(path, "조건은 객체여야 합니다.");
+			throw invalid(path, "조건은 객체여야 해요.");
 		}
 		SegmentField field = SegmentField.fromKey(text(c.get("field")));
 		if (field == null) {
-			throw invalid(path, "알 수 없는 조건 필드입니다: " + text(c.get("field")));
+			throw invalid(path, "알 수 없는 조건 필드예요: " + text(c.get("field")));
 		}
 		SegmentOperator op = operator(text(c.get("op")));
 		if (op == null || !field.allows(op)) {
-			throw invalid(path, field.key() + " 에 " + text(c.get("op")) + " 연산자는 쓸 수 없습니다.");
+			throw invalid(path, field.key() + " 에 " + text(c.get("op")) + " 연산자는 쓸 수 없어요.");
 		}
 		JsonNode v = c.get("value");
 		String vpath = path + ".value";
@@ -148,12 +148,12 @@ public final class SegmentRuleTranslator {
 	/** ["YYYY-MM-DD","YYYY-MM-DD"] 양 끝 포함. 날짜 형식은 고객 입력 정규화와 같은 규칙 */
 	private static Condition dateRange(SegmentField field, JsonNode v, String path) {
 		if (v == null || !v.isArray() || v.size() != 2) {
-			throw invalid(path, "BETWEEN 은 [시작일, 종료일] 두 값이어야 합니다.");
+			throw invalid(path, "BETWEEN 은 [시작일, 종료일] 두 값이어야 해요.");
 		}
 		LocalDate from = date(v.get(0), path + "[0]");
 		LocalDate to = date(v.get(1), path + "[1]");
 		if (from.isAfter(to)) {
-			throw invalid(path, "시작일이 종료일보다 늦습니다.");
+			throw invalid(path, "시작일이 종료일보다 늦어요.");
 		}
 		return new Condition(field, SegmentOperator.BETWEEN, from, to, null);
 	}
@@ -167,7 +167,7 @@ public final class SegmentRuleTranslator {
 		} catch (BusinessException e) {
 			// 고객 오류 코드(CUSTOMER_INVALID_DATE) 대신 세그먼트 오류 + 위치로 알린다
 		}
-		throw invalid(path, "날짜는 YYYY-MM-DD 형식이어야 합니다.");
+		throw invalid(path, "날짜는 YYYY-MM-DD 형식이어야 해요.");
 	}
 
 	private static Condition range(SegmentField field, long[] p) {
@@ -177,7 +177,7 @@ public final class SegmentRuleTranslator {
 	/** BETWEEN 정수 [최소, 최대] */
 	private static long[] pair(JsonNode v, String path, long min, long max) {
 		if (v == null || !v.isArray() || v.size() != 2) {
-			throw invalid(path, "BETWEEN 은 [최소, 최대] 두 값이어야 합니다.");
+			throw invalid(path, "BETWEEN 은 [최소, 최대] 두 값이어야 해요.");
 		}
 		long lo = integer(v.get(0), path + "[0]", min, max);
 		long hi = integer(v.get(1), path + "[1]", min, max);
@@ -189,11 +189,11 @@ public final class SegmentRuleTranslator {
 
 	private static long integer(JsonNode v, String path, long min, long max) {
 		if (v == null || !v.isIntegralNumber() || !v.canConvertToLong()) {
-			throw invalid(path, "정수여야 합니다.");
+			throw invalid(path, "정수여야 해요.");
 		}
 		long n = v.longValue();
 		if (n < min || n > max) {
-			throw invalid(path, min + " ~ " + max + " 범위여야 합니다.");
+			throw invalid(path, min + " ~ " + max + " 범위여야 해요.");
 		}
 		return n;
 	}
@@ -215,14 +215,14 @@ public final class SegmentRuleTranslator {
 		try {
 			return Region.valueOf(code).name();
 		} catch (IllegalArgumentException | NullPointerException e) {
-			throw invalid(path, "알 수 없는 지역 코드입니다: " + code);
+			throw invalid(path, "알 수 없는 지역 코드예요: " + code);
 		}
 	}
 
 	private static String yn(JsonNode v, String path) {
 		String s = text(v);
 		if (!"Y".equals(s) && !"N".equals(s)) {
-			throw invalid(path, "Y 또는 N 이어야 합니다.");
+			throw invalid(path, "Y 또는 N 이어야 해요.");
 		}
 		return s;
 	}
@@ -235,7 +235,7 @@ public final class SegmentRuleTranslator {
 		if ("OR".equals(s)) {
 			return LogicalOperator.OR;
 		}
-		throw invalid(path, "AND 또는 OR 이어야 합니다.");
+		throw invalid(path, "AND 또는 OR 이어야 해요.");
 	}
 
 	private static SegmentOperator operator(String s) {

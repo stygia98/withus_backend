@@ -67,7 +67,7 @@ class RequestBindingErrorApiTest {
 			.andExpect(jsonPath("$.success").value(false))
 			.andExpect(jsonPath("$.data").doesNotExist())
 			.andExpect(jsonPath("$.error.code").value("COMMON_INVALID_INPUT"))
-			.andExpect(jsonPath("$.error.message").value("필수 요청 값이 없습니다: targetCount"));
+			.andExpect(jsonPath("$.error.message").value("필수 요청 값이 없어요: targetCount"));
 	}
 
 	@Test
@@ -76,7 +76,7 @@ class RequestBindingErrorApiTest {
 				.cookie(access))
 			.andExpect(status().isBadRequest())
 			.andExpect(jsonPath("$.error.code").value("COMMON_INVALID_INPUT"))
-			.andExpect(jsonPath("$.error.message").value("요청 값이 올바르지 않습니다."));
+			.andExpect(jsonPath("$.error.message").value("요청 값이 올바르지 않아요."));
 	}
 
 	@Test
@@ -94,7 +94,7 @@ class RequestBindingErrorApiTest {
 		mvc.perform(multipart("/api/v1/files/images").file(other).cookie(access, xsrf).header("X-XSRF-TOKEN", xsrf.getValue()))
 			.andExpect(status().isBadRequest())
 			.andExpect(jsonPath("$.error.code").value("COMMON_INVALID_INPUT"))
-			.andExpect(jsonPath("$.error.message").value("필수 요청 값이 없습니다: file"));
+			.andExpect(jsonPath("$.error.message").value("필수 요청 값이 없어요: file"));
 	}
 
 	@Test

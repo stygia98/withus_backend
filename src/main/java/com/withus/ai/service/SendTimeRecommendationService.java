@@ -86,7 +86,7 @@ public class SendTimeRecommendationService {
 	public SendTimeRecommendationResponse recommend(long targetCount) {
 		if (targetCount < 0 || targetCount > MAX_TARGET_COUNT) {
 			throw new BusinessException(CommonErrorCode.COMMON_INVALID_INPUT,
-				"targetCount 는 0~" + MAX_TARGET_COUNT + " 입니다.", null);
+				"targetCount 는 0~" + MAX_TARGET_COUNT + " 사이여야 해요.", null);
 		}
 		// DB 조회를 먼저 끝내고 LLM 은 트랜잭션 밖에서 부른다 (CLAUDE.md 4장)
 		OffsetDateTime since = OffsetDateTime.now(clock).minusDays(LOOKBACK_DAYS);
@@ -99,7 +99,7 @@ public class SendTimeRecommendationService {
 			if (fitsGuardrail(DEFAULT_START, durationSeconds)) {
 				fallback.add(new Recommendation(WEEKDAY, hhmm(DEFAULT_START), null,
 					expectedEnd(DEFAULT_START, durationSeconds),
-					"최근 %d일 이벤트가 %d건 미만이라 기본값(평일 10:00)을 추천합니다.".formatted(LOOKBACK_DAYS, MIN_EVENTS)));
+					"최근 %d일 이벤트가 %d건 미만이라 기본값(평일 10:00)을 추천해요.".formatted(LOOKBACK_DAYS, MIN_EVENTS)));
 			}
 			return new SendTimeRecommendationResponse(false, fallback);
 		}
@@ -198,7 +198,7 @@ public class SendTimeRecommendationService {
 	}
 
 	static String fallbackReason(Candidate c) {
-		return "최근 %d일 동안 %s %s대에 오픈 %d건·클릭 %d건으로 반응이 많았습니다.".formatted(LOOKBACK_DAYS,
+		return "최근 %d일 동안 %s %s대에 오픈 %d건·클릭 %d건으로 반응이 많았어요.".formatted(LOOKBACK_DAYS,
 			koreanDay(c.day()), hhmm(c.start()), c.opens(), c.clicks());
 	}
 

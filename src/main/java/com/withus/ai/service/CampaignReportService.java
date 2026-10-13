@@ -34,7 +34,7 @@ public class CampaignReportService {
 	static final int MAX_SENTENCES = 5;
 	/** 성공 발송이 없으면 요약할 성과가 없으므로 LLM 을 부르지 않는다 (무료 등급 한도 절약) */
 	static final String NO_LLM_MODEL = "none";
-	static final String NO_DATA_CONTENT = "아직 성공한 발송이 없어 요약할 성과가 없습니다.";
+	static final String NO_DATA_CONTENT = "아직 성공한 발송이 없어 요약할 성과가 없어요.";
 
 	private static final String SYSTEM_INSTRUCTION = """
 		당신은 CRM 마케팅 성과 분석가다. 주어진 캠페인 집계 지표(JSON)를 관리자에게 보고하는 한국어 요약을 쓴다.
@@ -134,7 +134,7 @@ public class CampaignReportService {
 
 	private static String mockSummary(CampaignAnalyticsResponse a) {
 		SendKpi k = a.kpi();
-		return "[MOCK] '%s' 캠페인은 %d건을 시도해 %d건 발송에 성공했습니다. 오픈율 %.1f%%, 클릭률 %.1f%%, 전환율 %.1f%%입니다."
+		return "[MOCK] '%s' 캠페인은 %d건을 시도해 %d건 발송에 성공했어요. 오픈율 %.1f%%, 클릭률 %.1f%%, 전환율 %.1f%%예요."
 			.formatted(a.name(), k.attempted(), k.sent(), k.openRate() * 100, k.clickRate() * 100,
 				k.conversionRate() * 100);
 	}

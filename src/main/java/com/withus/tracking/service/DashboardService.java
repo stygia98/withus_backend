@@ -75,7 +75,7 @@ public class DashboardService {
 	/** 오늘 포함 최근 days 일의 일별 발송 성공 건수 (오래된 날짜부터, 발송 없는 날은 0) */
 	public List<DailySendResponse> dailySends(int days) {
 		if (days < 1 || days > MAX_DAILY_DAYS) {
-			throw invalid("days 는 1~" + MAX_DAILY_DAYS + " 사이여야 합니다.");
+			throw invalid("days 는 1~" + MAX_DAILY_DAYS + " 사이여야 해요.");
 		}
 		LocalDate today = LocalDate.now(clock);
 		return dashboardMapper.dailySends(today.minusDays(days - 1), today).stream()
@@ -102,7 +102,7 @@ public class DashboardService {
 	/** 최근 이벤트 (10초 폴링). after 보다 새 이벤트를 최신순으로 최대 size 개 */
 	public RecentEventsResponse events(Long after, int size) {
 		if (size < 1 || size > MAX_EVENTS) {
-			throw invalid("size 는 1~" + MAX_EVENTS + " 사이여야 합니다.");
+			throw invalid("size 는 1~" + MAX_EVENTS + " 사이여야 해요.");
 		}
 		List<RecentEventRow> events = dashboardMapper.recentEvents(after, size);
 		Long lastEventId = events.isEmpty() ? after : events.get(0).getEventId();
@@ -161,10 +161,10 @@ public class DashboardService {
 
 		static SendDateBounds of(LocalDate from, LocalDate to, LocalDate today) {
 			if (from != null && to != null && from.isAfter(to)) {
-				throw invalid("from 은 to 보다 늦을 수 없습니다.");
+				throw invalid("from 은 to 보다 늦을 수 없어요.");
 			}
 			if (from != null && ChronoUnit.DAYS.between(from, to != null ? to : today) + 1 > MAX_SUMMARY_DAYS) {
-				throw invalid("조회 기간은 최대 " + MAX_SUMMARY_DAYS + "일입니다.");
+				throw invalid("조회 기간은 최대 " + MAX_SUMMARY_DAYS + "일이에요.");
 			}
 			return new SendDateBounds(from == null ? null : from.atStartOfDay(SEOUL).toOffsetDateTime(),
 				to == null ? null : to.plusDays(1).atStartOfDay(SEOUL).toOffsetDateTime());
