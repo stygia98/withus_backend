@@ -87,7 +87,7 @@
 	</update>
 
 	<sql id="issueColumns">
-		i.issue_id, i.code, i.coupon_id, i.customer_id, cu.name AS customer_name, i.send_log_id, i.issued_at, i.used_at,
+		i.issue_id, i.code, i.token::text AS token, i.coupon_id, i.customer_id, cu.name AS customer_name, i.send_log_id, i.issued_at, i.used_at,
 		c.name AS coupon_name, c.discount_type, c.discount_value, c.max_discount_amount, c.valid_from, c.valid_to
 	</sql>
 

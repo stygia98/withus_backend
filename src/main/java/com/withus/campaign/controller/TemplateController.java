@@ -32,7 +32,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 
-@Tag(name = "템플릿", description = "메일·SMS 템플릿 CRUD·복제 (API_SPEC 5장)")
+@Tag(name = "템플릿", description = "메일·SMS 템플릿 CRUD·복사 (API_SPEC 5장)")
 @RestController
 @RequestMapping("/api/v1/templates")
 public class TemplateController {
@@ -96,7 +96,7 @@ public class TemplateController {
 		return ApiResponse.ok(null);
 	}
 
-	@Operation(summary = "템플릿 복제")
+	@Operation(summary = "템플릿 복사")
 	@PreAuthorize("hasAnyRole('OWNER','MANAGER','STAFF')")
 	@PostMapping("/{templateId}/duplicate")
 	public ApiResponse<TemplateResponse> duplicate(@PathVariable long templateId,

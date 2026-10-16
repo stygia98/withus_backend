@@ -9,7 +9,7 @@ import jakarta.validation.constraints.NotNull;
 /** type 은 생성 후 바꾸지 않는다. DRAFT 상태에서만 호출된다(CampaignService) */
 public record CampaignUpdateRequest(
 	@NotBlank(message = "이름을 입력하세요.") String name,
-	@NotNull(message = "세그먼트를 선택하세요.") Long segmentId,
+	@NotNull(message = "타겟팅을 선택하세요.") Long segmentId,
 	Long templateId,
 	Long couponId,
 	TriggerType triggerType) {

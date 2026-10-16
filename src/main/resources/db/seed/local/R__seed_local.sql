@@ -35,7 +35,7 @@ ON CONFLICT (email) WHERE deleted_yn = 'N' DO NOTHING;
 INSERT INTO segment (name, description, created_by)
 SELECT v.name, v.description, m.member_id
 FROM (VALUES
-        ('서울·경기 구매 10만 원 이상', 'PRD 10.3 시연 시나리오 세그먼트'),
+        ('서울·경기 구매 10만 원 이상', 'PRD 10.3 시연 시나리오 타겟팅'),
         ('최근 90일 가입·메일 수신동의', '신규 고객 환영 캠페인용')
      ) AS v(name, description)
 JOIN member m ON m.email = 'seed@withus.local'
