@@ -430,7 +430,7 @@ public class CampaignService {
 
 	private void requireSegment(Long segmentId) {
 		if (segmentId == null || !campaignMapper.existsSegment(segmentId)) {
-			throw new BusinessException(CommonErrorCode.COMMON_INVALID_INPUT, "존재하지 않는 세그먼트예요.", null);
+			throw new BusinessException(CommonErrorCode.COMMON_INVALID_INPUT, "존재하지 않는 타겟팅이에요.", null);
 		}
 	}
 

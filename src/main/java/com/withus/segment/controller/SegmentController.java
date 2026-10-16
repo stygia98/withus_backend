@@ -29,7 +29,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
-@Tag(name = "세그먼트", description = "조건 기반 동적 세그먼트 (API_SPEC 4장, docs/plans/segment-sql.md)")
+@Tag(name = "타겟팅", description = "조건 기반 동적 타겟팅 (API_SPEC 4장, docs/plans/segment-sql.md)")
 @RestController
 @RequestMapping("/api/v1/segments")
 @RequiredArgsConstructor
@@ -40,7 +40,7 @@ public class SegmentController {
 
 	private final SegmentServiceImpl segmentService;
 
-	@Operation(summary = "목록", description = "최신순, 세그먼트마다 현재 대상 수 포함. STAFF 는 조회만 (PRD 3장)")
+	@Operation(summary = "목록", description = "최신순, 타겟팅마다 현재 대상 수 포함. STAFF 는 조회만 (PRD 3장)")
 	@PreAuthorize("hasAnyRole('OWNER','MANAGER','STAFF')")
 	@GetMapping
 	public ApiResponse<PageResponse<SegmentResponse>> list(@RequestParam(defaultValue = "0") int page,
