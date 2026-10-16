@@ -17,7 +17,7 @@ import com.withus.common.exception.CommonErrorCode;
 import com.withus.common.response.PageResponse;
 
 /**
- * 템플릿 생성·수정·삭제·복제와 입력 검증 (API_SPEC 5장)
+ * 템플릿 생성·수정·삭제·복사와 입력 검증 (API_SPEC 5장)
  * 치환은 이 클래스의 책임이 아니다 — 여기서는 허용된 치환자인지만 검증하고,
  * 실제 치환은 발송 직전 common.render.PlaceholderRenderer(팀원3)가 한다
  */
@@ -91,7 +91,7 @@ public class TemplateService {
 		templateMapper.delete(templateId);
 	}
 
-	/** 이름에 접미사를 붙여 새 템플릿으로 복제한다. 사용 중 여부와 무관하게 항상 허용 */
+	/** 이름에 접미사를 붙여 새 템플릿으로 복사한다. 사용 중 여부와 무관하게 항상 허용 */
 	public Template duplicate(long templateId, long memberId) {
 		Template source = getOrThrow(templateId);
 		Template copy = new Template();

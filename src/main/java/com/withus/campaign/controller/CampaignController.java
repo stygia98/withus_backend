@@ -139,7 +139,7 @@ public class CampaignController {
 		return ApiResponse.ok(null);
 	}
 
-	@Operation(summary = "복제", description = "새 DRAFT 로 복제한다. 워크플로우는 구조(노드)까지 복사하고 인스턴스·발송 이력은 복사하지 않는다.")
+	@Operation(summary = "복사", description = "새 DRAFT 로 복사한다. 워크플로우는 구조(노드)까지 복사하고 인스턴스·발송 이력은 복사하지 않는다.")
 	@PreAuthorize("hasAnyRole('OWNER','MANAGER')")
 	@PostMapping("/{campaignId}/duplicate")
 	public ApiResponse<CampaignResponse> duplicate(@PathVariable long campaignId,

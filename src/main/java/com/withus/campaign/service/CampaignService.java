@@ -354,7 +354,7 @@ public class CampaignService {
 	}
 
 	/**
-	 * 새 DRAFT 로 복제한다(API_SPEC 6장). 템플릿·쿠폰·세그먼트 참조는 그대로 두고, 워크플로우는 노드를 새
+	 * 새 DRAFT 로 복사한다(API_SPEC 6장). 템플릿·쿠폰·세그먼트 참조는 그대로 두고, 워크플로우는 노드를 새
 	 * step_id 로 복사하며 next·yes·no 를 새 ID 로 다시 잇는다. 인스턴스·발송 이력은 복사하지 않는다
 	 */
 	@Transactional
