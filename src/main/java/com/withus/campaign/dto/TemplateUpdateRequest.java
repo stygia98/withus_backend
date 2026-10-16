@@ -10,7 +10,7 @@ public record TemplateUpdateRequest(
 	@NotBlank(message = "이름을 입력하세요.") String name,
 	String subject,
 	@NotBlank(message = "본문을 입력하세요.") String body,
-	@NotBlank @Pattern(regexp = "[YN]", message = "adYn 은 Y 또는 N 입니다.") String adYn) {
+	@NotBlank @Pattern(regexp = "[YN]", message = "adYn 은 Y 또는 N 이어야 해요.") String adYn) {
 
 	public Template toTemplate() {
 		Template template = new Template();

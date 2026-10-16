@@ -59,7 +59,7 @@ public class TemplatePreviewService {
 		if (canReadCustomer && sampleCustomerId != null) {
 			sample = sendLogMapper.findPreviewSource(sampleCustomerId);
 			if (sample == null) {
-				throw new BusinessException(CommonErrorCode.COMMON_NOT_FOUND, "미리보기용 고객을 찾을 수 없습니다.", null);
+				throw new BusinessException(CommonErrorCode.COMMON_NOT_FOUND, "미리보기용 고객을 찾을 수 없어요.", null);
 			}
 		}
 		Map<String, String> values = MessageComposer.placeholderValues(sample, exampleCouponUrl());

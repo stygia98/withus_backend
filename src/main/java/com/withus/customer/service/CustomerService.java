@@ -117,7 +117,7 @@ public class CustomerService {
 		CustomerSort sortKey = CustomerSort.fromKey(sortParts[0].trim());
 		String direction = sortParts.length > 1 ? sortParts[1].trim().toLowerCase(Locale.ROOT) : "desc";
 		if (sortKey == null || sortParts.length > 2 || !(direction.equals("asc") || direction.equals("desc"))) {
-			throw invalid("sort 는 createdAt·name·joinedAt·totalPurchase 와 asc·desc 만 쓸 수 있습니다.");
+			throw invalid("sort 는 createdAt·name·joinedAt·totalPurchase 와 asc·desc 만 쓸 수 있어요.");
 		}
 
 		String kw = keyword == null || keyword.isBlank() ? null : keyword.trim();

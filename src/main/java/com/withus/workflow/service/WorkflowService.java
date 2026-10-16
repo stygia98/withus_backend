@@ -85,7 +85,7 @@ public class WorkflowService {
 		// 캠페인 행을 잠가서 확인한다(PR #34 리뷰 🔴2): 동시에 PUT 두 개가 오면 하나씩 처리되고, 시작 요청이 먼저 ACTIVE 로
 		// 커밋했다면 여기서 409 가 된다. 잠그지 않으면 실행 중인 캠페인의 단계를 지우려다 FK 위반(500)이 날 수 있다
 		if (!"DRAFT".equals(workflowStepMapper.lockCampaignStatus(campaignId))) {
-			throw new BusinessException(CampaignErrorCode.CAMPAIGN_INVALID_STATUS, "DRAFT 상태의 워크플로우만 저장할 수 있습니다.",
+			throw new BusinessException(CampaignErrorCode.CAMPAIGN_INVALID_STATUS, "DRAFT 상태의 워크플로우만 저장할 수 있어요.",
 				null);
 		}
 
@@ -145,7 +145,7 @@ public class WorkflowService {
 
 	private void requireWorkflow(Campaign campaign) {
 		if (campaign.getType() != CampaignType.WORKFLOW) {
-			throw new BusinessException(CommonErrorCode.COMMON_INVALID_INPUT, "워크플로우 캠페인만 지원합니다.", null);
+			throw new BusinessException(CommonErrorCode.COMMON_INVALID_INPUT, "워크플로우 캠페인만 지원해요.", null);
 		}
 	}
 

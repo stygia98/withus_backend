@@ -2,7 +2,6 @@ package com.withus.coupon.controller;
 
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -25,17 +24,12 @@ public class PublicCouponController {
 		this.publicCouponService = publicCouponService;
 	}
 
-	@Operation(summary = "쿠폰 카드 조회", description = "상태를 바꾸지 않는다. 없는 토큰은 COUPON_NOT_FOUND(404).")
+	@Operation(summary = "쿠폰 카드 조회",
+		description = "상태를 바꾸지 않는다. 매장 바코드용 12자리 쿠폰 번호(code)를 함께 준다. 없는 토큰은 COUPON_NOT_FOUND(404). "
+			+ "사용 처리는 고객 화면이 아니라 매장 직원이 한다(POST /api/v1/coupon-issues/by-code/{code}/use).")
 	@GetMapping
 	public ApiResponse<PublicCouponResponse> card(@PathVariable String token) {
 		return ApiResponse.ok(PublicCouponResponse.from(publicCouponService.find(token), publicCouponService.today()));
 	}
 
-	@Operation(summary = "쿠폰 사용하기",
-		description = "발급 1건당 1회, 유효기간 안에서만. 이미 사용 COUPON_ALREADY_USED(409), 기간 밖 COUPON_NOT_USABLE(422). "
-			+ "성공하면 status=USED 인 카드를 돌려준다.")
-	@PostMapping("/use")
-	public ApiResponse<PublicCouponResponse> use(@PathVariable String token) {
-		return ApiResponse.ok(PublicCouponResponse.from(publicCouponService.use(token), publicCouponService.today()));
-	}
 }

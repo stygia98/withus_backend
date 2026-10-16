@@ -12,6 +12,7 @@ import com.withus.auth.domain.Member;
 import com.withus.auth.dto.MemberAdminResponse;
 import com.withus.auth.dto.MemberCreateRequest;
 import com.withus.auth.dto.MemberUpdateRequest;
+import com.withus.auth.dto.PasswordResetRequest;
 import com.withus.auth.mapper.MemberMapper;
 import com.withus.common.exception.BusinessException;
 import com.withus.common.exception.CommonErrorCode;
@@ -70,5 +71,19 @@ public class MemberService {
 			throw new BusinessException(CommonErrorCode.COMMON_NOT_FOUND);
 		}
 		return MemberAdminResponse.from(memberMapper.findById(memberId));
+	}
+
+	/**
+	 * 비밀번호 재설정. 기존 비밀번호는 BCrypt 해시라 알 수 없고, 새 비밀번호로 덮어쓰기만 한다.
+	 * Refresh 를 지워 기존 로그인을 끊는다. 본인은 AuthService.changePassword 로 바꾼다
+	 */
+	@Transactional
+	public void resetPassword(long memberId, PasswordResetRequest req, long currentMemberId) {
+		if (memberId == currentMemberId) {
+			throw new BusinessException(AuthErrorCode.MEMBER_SELF_PASSWORD);
+		}
+		if (memberMapper.updatePassword(memberId, passwordEncoder.encode(req.newPassword())) == 0) {
+			throw new BusinessException(CommonErrorCode.COMMON_NOT_FOUND);
+		}
 	}
 }

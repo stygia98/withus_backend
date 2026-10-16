@@ -151,7 +151,7 @@ class SendTimeRecommendationServiceTest {
 		List<Recommendation> recs = service(1).recommend(10).recommendations();
 
 		assertThat(recs).hasSize(3);
-		assertThat(recs.get(0).reason()).isEqualTo("최근 90일 동안 화요일 10:00대에 오픈 20건·클릭 40건으로 반응이 많았습니다.");
+		assertThat(recs.get(0).reason()).isEqualTo("최근 90일 동안 화요일 10:00대에 오픈 20건·클릭 40건으로 반응이 많았어요.");
 	}
 
 	@Test

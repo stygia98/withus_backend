@@ -41,4 +41,7 @@ public interface MemberMapper {
 	/** 역할·활성 여부 변경. null 이면 그대로 둔다. 다시 로그인하도록 Refresh 토큰도 지운다 */
 	int updateRoleAndActive(@Param("memberId") long memberId, @Param("role") Role role,
 		@Param("activeYn") String activeYn);
+
+	/** 비밀번호 해시 교체. 기존 로그인을 끊고(Refresh 삭제) 실패 기록·잠금도 풀어 새 비밀번호로 바로 들어오게 한다 */
+	int updatePassword(@Param("memberId") long memberId, @Param("password") String password);
 }

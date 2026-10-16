@@ -106,10 +106,15 @@ class CouponPurchaseDateTest {
 	}
 
 	@Test
-	void 고객_사용하기는_오늘_기준이라_지난_쿠폰을_거절한다() throws Exception {
+	void 매장_바코드_사용은_오늘_기준이라_지난_쿠폰을_거절한다() throws Exception {
 		String token = (String) expiredIssue()[1];
+		String code = jdbc.queryForObject("SELECT code FROM coupon_issue WHERE token = CAST(? AS uuid)", String.class,
+			token);
 
-		mvc.perform(post("/api/v1/public/coupons/" + token + "/use"))
+		mvc.perform(post("/api/v1/coupon-issues/by-code/" + code + "/use")
+				.with(authentication(new UsernamePasswordAuthenticationToken(new AuthMember(memberId, Role.MANAGER), null,
+					List.of(new SimpleGrantedAuthority("ROLE_MANAGER")))))
+				.with(csrf))
 			.andExpect(status().isUnprocessableContent())
 			.andExpect(jsonPath("$.error.code").value("COUPON_NOT_USABLE"));
 	}

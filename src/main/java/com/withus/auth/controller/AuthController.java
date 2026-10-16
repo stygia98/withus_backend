@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.withus.auth.dto.LoginRequest;
 import com.withus.auth.dto.MemberResponse;
+import com.withus.auth.dto.PasswordChangeRequest;
 import com.withus.auth.security.AuthCookies;
 import com.withus.auth.security.AuthMember;
 import com.withus.auth.security.JwtProvider;
@@ -72,6 +73,17 @@ public class AuthController {
 	public ApiResponse<Void> logout(@AuthenticationPrincipal AuthMember me, HttpServletResponse response) {
 		authService.logout(me.memberId());
 		authCookies.clear(response);
+		return ApiResponse.ok(null);
+	}
+
+	@Operation(summary = "내 비밀번호 변경", description = "로그인한 모든 역할. 현재 비밀번호 확인 후 변경하고 새 토큰 쿠키를 발급한다"
+		+ "(다른 기기 로그인은 끊김). 새 비밀번호 8~72자. 오류: AUTH_CURRENT_PASSWORD_INVALID(400), "
+		+ "AUTH_PASSWORD_CHANGE_LOCKED(429, 5회 실패 시 5분)")
+	@PostMapping("/password")
+	public ApiResponse<Void> changePassword(@Valid @RequestBody PasswordChangeRequest request,
+		@AuthenticationPrincipal AuthMember me, HttpServletResponse response) {
+		writeCookies(response,
+			authService.changePassword(me.memberId(), request.currentPassword(), request.newPassword()));
 		return ApiResponse.ok(null);
 	}
 
