@@ -33,14 +33,27 @@ public interface MemberMapper {
 
 	void clearRefreshToken(long memberId);
 
-	/** 사용자 관리 목록 (member_id 순) */
+	/** 사용자 관리 목록 (member_id 순, 삭제한 계정 제외) */
 	List<Member> findAll();
 
-	boolean existsEmail(String email);
+	/** 삭제한 계정 목록 (최근 삭제순) — 복구용 */
+	List<Member> findDeleted();
 
-	/** 역할·활성 여부 변경. null 이면 그대로 둔다. 다시 로그인하도록 Refresh 토큰도 지운다 */
-	int updateRoleAndActive(@Param("memberId") long memberId, @Param("role") Role role,
-		@Param("activeYn") String activeYn);
+	/** 삭제되지 않은 계정 중 같은 이메일이 있는가. exceptMemberId 가 있으면 그 계정은 뺀다(수정할 때 자기 자신) */
+	boolean existsEmail(@Param("email") String email, @Param("exceptMemberId") Long exceptMemberId);
+
+	/**
+	 * 이름·이메일·역할·활성 여부 변경. null 이면 그대로 둔다. 역할·활성 여부가 바뀌면 다시 로그인하도록 Refresh 토큰도 지운다.
+	 * 삭제한 계정은 바꾸지 않는다(0건)
+	 */
+	int updateMember(@Param("memberId") long memberId, @Param("name") String name, @Param("email") String email,
+		@Param("role") Role role, @Param("activeYn") String activeYn);
+
+	/** 삭제 표시 (로그인 끊기). 이미 삭제됐거나 없으면 0건 */
+	int markDeleted(long memberId);
+
+	/** 삭제 표시를 지운다. 삭제된 계정이 아니면 0건, 같은 이메일의 계정이 있으면 DuplicateKeyException */
+	int restore(long memberId);
 
 	/** 비밀번호 해시 교체. 기존 로그인을 끊고(Refresh 삭제) 실패 기록·잠금도 풀어 새 비밀번호로 바로 들어오게 한다 */
 	int updatePassword(@Param("memberId") long memberId, @Param("password") String password);
