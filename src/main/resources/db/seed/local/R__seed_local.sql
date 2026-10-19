@@ -4,9 +4,11 @@
 
 -- 시드 작성자 계정: Flyway 가 OWNER 생성(앱 시작 후)보다 먼저 실행되므로 created_by 용으로 둔다.
 -- 비활성(active_yn = 'N')이고 BCrypt 가 아닌 비밀번호라 로그인할 수 없다.
+-- V33 부터 이메일 유일성이 부분 인덱스(삭제 안 된 계정만)라 ON CONFLICT (email) 를 못 쓴다.
+-- 삭제 표시한 시드 계정도 있는 것으로 보고 다시 만들지 않는다.
 INSERT INTO member (email, password, name, role, active_yn)
-VALUES ('seed@withus.local', 'SEED-ACCOUNT-NO-LOGIN', '시드 데이터', 'STAFF', 'N')
-ON CONFLICT (email) DO NOTHING;
+SELECT 'seed@withus.local', 'SEED-ACCOUNT-NO-LOGIN', '시드 데이터', 'STAFF', 'N'
+WHERE NOT EXISTS (SELECT 1 FROM member WHERE email = 'seed@withus.local');
 
 -- 고객 100명
 --  지역: SEOUL 40 / GYEONGGI 30 / BUSAN 30, 나이 20~60세, 가입일 최근 3~300일, 누적구매액 0~19만 원
