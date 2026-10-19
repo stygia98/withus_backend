@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -111,6 +112,102 @@ class MemberApiTest {
 		call(get("/api/v1/members"), Role.MANAGER).andExpect(status().isForbidden());
 		call(post("/api/v1/members").content(body(email, Role.STAFF, PASSWORD)), Role.MANAGER)
 			.andExpect(status().isForbidden());
+	}
+
+	@Test
+	void 이름과_이메일을_수정하고_이메일은_정규화와_중복을_검사한다() throws Exception {
+		long id = idOf(create(email, Role.STAFF));
+		String other = "other-" + UUID.randomUUID() + "@withus.local";
+		create(other, Role.STAFF).andExpect(status().isOk());
+		String changed = "changed-" + UUID.randomUUID() + "@withus.local";
+
+		call(patch("/api/v1/members/" + id).content("{\"name\":\" 스태프2 \",\"email\":\"" + changed.toUpperCase() + "\"}"),
+			Role.OWNER)
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.data.name").value("스태프2"))
+			.andExpect(jsonPath("$.data.email").value(changed))
+			.andExpect(jsonPath("$.data.role").value("STAFF"));
+		// 이름·이메일만 바꾸면 로그인을 끊지 않는다 (토큰은 member_id 기준)
+		assertThat(authService.login(changed, PASSWORD).member().getMemberId()).isEqualTo(id);
+		assertThat(refreshHashOf(id)).isNotNull();
+		call(patch("/api/v1/members/" + id).content("{\"name\":\"이름만\"}"), Role.OWNER).andExpect(status().isOk());
+		assertThat(refreshHashOf(id)).isNotNull();
+
+		call(patch("/api/v1/members/" + id).content("{\"email\":\"" + other + "\"}"), Role.OWNER)
+			.andExpect(status().isConflict())
+			.andExpect(jsonPath("$.error.code").value("MEMBER_DUPLICATE_EMAIL"));
+		call(patch("/api/v1/members/" + id).content("{\"name\":\"   \"}"), Role.OWNER).andExpect(status().isBadRequest());
+		call(patch("/api/v1/members/" + id).content("{\"email\":\"not-email\"}"), Role.OWNER)
+			.andExpect(status().isBadRequest());
+	}
+
+	@Test
+	void 자기_계정도_이름과_이메일은_바꾸지만_역할은_못_바꾼다() throws Exception {
+		String mine = "owner-" + UUID.randomUUID() + "@withus.local";
+		call(patch("/api/v1/members/" + OWNER_ID).content("{\"name\":\"김위드\",\"email\":\"" + mine + "\"}"), Role.OWNER)
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.data.name").value("김위드"));
+		call(patch("/api/v1/members/" + OWNER_ID).content("{\"name\":\"김위드\",\"role\":\"STAFF\"}"), Role.OWNER)
+			.andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.error.code").value("MEMBER_SELF_CHANGE"));
+	}
+
+	@Test
+	void 삭제하면_목록과_로그인에서_빠지고_같은_이메일로_다시_만들_수_있다() throws Exception {
+		long id = idOf(create(email, Role.STAFF));
+		authService.login(email, PASSWORD);
+		// 삭제해도 그 계정이 만든 기록(created_by)은 남는다
+		long segmentId = jdbc.queryForObject("INSERT INTO segment (name, created_by) VALUES ('삭제 전 생성', ?) RETURNING segment_id",
+			Long.class, id);
+
+		call(delete("/api/v1/members/" + id), Role.OWNER).andExpect(status().isOk());
+
+		call(get("/api/v1/members"), Role.OWNER)
+			.andExpect(jsonPath("$.data[?(@.memberId == " + id + ")]").isEmpty());
+		call(get("/api/v1/members/deleted"), Role.OWNER)
+			.andExpect(jsonPath("$.data[?(@.memberId == " + id + ")].email").value(email))
+			.andExpect(jsonPath("$.data[?(@.memberId == " + id + ")].deletedAt").isNotEmpty());
+		assertThat(refreshHashOf(id)).isNull();
+		assertThatThrownBy(() -> authService.login(email, PASSWORD)).isInstanceOf(BusinessException.class)
+			.extracting(e -> ((BusinessException) e).getErrorCode().code()).isEqualTo("AUTH_INVALID_CREDENTIALS");
+		assertThat(jdbc.queryForObject("SELECT created_by FROM segment WHERE segment_id = ?", Long.class, segmentId))
+			.isEqualTo(id);
+		// 삭제한 계정은 수정·재삭제할 수 없다
+		call(patch("/api/v1/members/" + id).content("{\"name\":\"x\"}"), Role.OWNER).andExpect(status().isNotFound());
+		call(delete("/api/v1/members/" + id), Role.OWNER).andExpect(status().isNotFound());
+
+		create(email, Role.MANAGER).andExpect(status().isOk());
+	}
+
+	@Test
+	void 복구하면_예전_비밀번호로_로그인되고_같은_이메일이_다시_생겼으면_409() throws Exception {
+		long id = idOf(create(email, Role.STAFF));
+		call(delete("/api/v1/members/" + id), Role.OWNER).andExpect(status().isOk());
+
+		call(post("/api/v1/members/" + id + "/restore"), Role.OWNER)
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.data.deletedAt").doesNotExist());
+		assertThat(authService.login(email, PASSWORD).member().getMemberId()).isEqualTo(id);
+		call(post("/api/v1/members/" + id + "/restore"), Role.OWNER).andExpect(status().isNotFound());
+
+		call(delete("/api/v1/members/" + id), Role.OWNER).andExpect(status().isOk());
+		create(email, Role.STAFF).andExpect(status().isOk());
+		call(post("/api/v1/members/" + id + "/restore"), Role.OWNER)
+			.andExpect(status().isConflict())
+			.andExpect(jsonPath("$.error.code").value("MEMBER_DUPLICATE_EMAIL"));
+	}
+
+	@Test
+	void 자기_계정은_삭제할_수_없고_삭제와_복구는_OWNER_만() throws Exception {
+		call(delete("/api/v1/members/" + OWNER_ID), Role.OWNER)
+			.andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.error.code").value("MEMBER_SELF_DELETE"));
+		call(delete("/api/v1/members/999999999"), Role.OWNER).andExpect(status().isNotFound());
+
+		long id = idOf(create(email, Role.STAFF));
+		call(delete("/api/v1/members/" + id), Role.MANAGER).andExpect(status().isForbidden());
+		call(get("/api/v1/members/deleted"), Role.MANAGER).andExpect(status().isForbidden());
+		call(post("/api/v1/members/" + id + "/restore"), Role.MANAGER).andExpect(status().isForbidden());
 	}
 
 	@Test

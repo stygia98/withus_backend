@@ -14,6 +14,16 @@ public class Member {
 	private String refreshTokenHash;
 	private int failedLoginCount;
 	private OffsetDateTime lockedUntil;
+	/** 삭제 표시 시각 (V33). null 이면 삭제되지 않은 계정 */
+	private OffsetDateTime deletedAt;
+
+	public OffsetDateTime getDeletedAt() {
+		return deletedAt;
+	}
+
+	public void setDeletedAt(OffsetDateTime deletedAt) {
+		this.deletedAt = deletedAt;
+	}
 
 	public boolean isActive() {
 		return "Y".equals(activeYn);
