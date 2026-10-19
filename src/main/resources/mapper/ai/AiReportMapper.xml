@@ -2,10 +2,24 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.withus.ai.mapper.AiReportMapper">
 
-	<select id="insert" resultType="long" flushCache="true">
-		INSERT INTO ai_report (campaign_id, report_type, input_json, content, model)
-		VALUES (#{campaignId}, #{reportType}, CAST(#{inputJson} AS jsonb), #{content}, #{model})
-		RETURNING report_id
+	<!-- 새 요약 저장과 오래된 이력 정리를 한 문장으로 한다. DELETE 는 같은 문장의 INSERT 결과를 보지 못하므로
+	     기존 행은 keep - 1 건만 남겨 새 행과 합쳐 keep 건이 된다 -->
+	<select id="insertKeepingLatest" resultType="long" flushCache="true">
+		WITH inserted AS (
+			INSERT INTO ai_report (campaign_id, report_type, input_json, content, model)
+			VALUES (#{campaignId}, #{reportType}, CAST(#{inputJson} AS jsonb), #{content}, #{model})
+			RETURNING report_id
+		), trimmed AS (
+			DELETE FROM ai_report
+			WHERE campaign_id = #{campaignId} AND report_type = #{reportType}
+			  AND report_id NOT IN (
+			      SELECT report_id FROM ai_report
+			      WHERE campaign_id = #{campaignId} AND report_type = #{reportType}
+			      ORDER BY report_id DESC
+			      LIMIT #{keep} - 1
+			  )
+		)
+		SELECT report_id FROM inserted
 	</select>
 
 	<select id="findLatest" resultType="com.withus.ai.domain.AiReport" flushCache="true">
