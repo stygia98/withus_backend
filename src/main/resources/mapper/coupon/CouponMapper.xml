@@ -47,18 +47,19 @@
 		WHERE coupon_id = #{couponId}
 	</update>
 
-	<!-- 동시 재시도에서도 제약 위반 없이 1건만 남는다. 기존 건이 있으면 그 토큰을 다시 조회해 쓴다 -->
+	<!-- 동시 재시도에서도 제약 위반 없이 1건만 남는다. 기존 건이 있으면 그 토큰을 다시 조회해 쓴다.
+	     충돌 대상을 정하지 않아 쿠폰 번호(code, 기본값으로 생성)가 드물게 겹쳐도 오류 없이 0건이 되고, 호출하는 쪽이 다시 시도한다 -->
 	<insert id="insertIssueIfAbsent">
 		INSERT INTO coupon_issue (coupon_id, customer_id, send_log_id)
 		VALUES (#{couponId}, #{customerId}, #{sendLogId})
-		ON CONFLICT (send_log_id) DO NOTHING
+		ON CONFLICT DO NOTHING
 	</insert>
 
 	<select id="findTokenBySendLog" resultType="string" flushCache="true">
 		SELECT CAST(token AS text) FROM coupon_issue WHERE send_log_id = #{sendLogId}
 	</select>
 
-	<!-- 조건을 UPDATE 한 문장에 넣어 두 번 눌러도 한 번만 성공한다 (조회 후 갱신하면 경합에서 둘 다 통과). 고객 사용하기는 오늘 기준 -->
+	<!-- 조건을 UPDATE 한 문장에 넣어 두 번 찍어도 한 번만 성공한다 (조회 후 갱신하면 경합에서 둘 다 통과). 매장 바코드 사용 처리는 오늘 기준 -->
 	<sql id="usableCondition">
 		i.used_at IS NULL
 		AND c.coupon_id = i.coupon_id
@@ -71,14 +72,22 @@
 		WHERE issue_id = #{issueId} AND used_at IS NULL
 	</update>
 
-	<update id="markUsedByToken">
+	<update id="markUsedByCode">
 		UPDATE coupon_issue i SET used_at = now(), updated_at = now()
 		FROM coupon c
-		WHERE i.token = CAST(#{token} AS uuid) AND <include refid="usableCondition"/>
+		WHERE i.code = #{code} AND <include refid="usableCondition"/>
+	</update>
+
+	<!-- 사용 처리와 같이 조건을 한 문장에 둔다(두 번 눌러도 한 번만 성공). 구매 등록(purchase)으로 쓴 쿠폰은
+	     금액·누적구매액이 함께 기록돼 있어 여기서 되돌리지 않는다 -->
+	<update id="cancelUseByCode">
+		UPDATE coupon_issue i SET used_at = NULL, updated_at = now()
+		WHERE i.code = #{code} AND i.used_at IS NOT NULL
+		  AND NOT EXISTS (SELECT 1 FROM purchase p WHERE p.coupon_issue_id = i.issue_id)
 	</update>
 
 	<sql id="issueColumns">
-		i.issue_id, i.coupon_id, i.customer_id, cu.name AS customer_name, i.send_log_id, i.issued_at, i.used_at,
+		i.issue_id, i.code, i.token::text AS token, i.coupon_id, i.customer_id, cu.name AS customer_name, i.send_log_id, i.issued_at, i.used_at,
 		c.name AS coupon_name, c.discount_type, c.discount_value, c.max_discount_amount, c.valid_from, c.valid_to
 	</sql>
 
@@ -98,10 +107,15 @@
 		WHERE i.token = CAST(#{token} AS uuid)
 	</select>
 
+	<select id="findIssueByCode" resultType="com.withus.coupon.domain.CouponIssueRow" flushCache="true">
+		SELECT <include refid="issueColumns"/> <include refid="issueFrom"/>
+		WHERE i.code = #{code}
+	</select>
+
 	<select id="findIssuesByCoupon" resultType="com.withus.coupon.domain.CouponIssueRow">
 		SELECT <include refid="issueColumns"/> <include refid="issueFrom"/>
 		WHERE i.coupon_id = #{couponId}
-		ORDER BY i.issue_id DESC
+		ORDER BY i.issued_at DESC, i.issue_id DESC
 		LIMIT #{limit} OFFSET #{offset}
 	</select>
 
@@ -116,6 +130,6 @@
 		  AND i.used_at IS NULL
 		  AND #{usableOn} BETWEEN c.valid_from AND c.valid_to
 		</if>
-		ORDER BY i.issue_id DESC
+		ORDER BY i.issued_at DESC, i.issue_id DESC
 	</select>
 </mapper>

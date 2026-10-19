@@ -124,7 +124,7 @@ class AiReportApiTest {
 		mvc.perform(post("/api/v1/ai/reports/campaigns/" + campaignId).with(auth(Role.MANAGER)).with(csrf))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.data.model").value("none"))
-			.andExpect(jsonPath("$.data.content").value("아직 성공한 발송이 없어 요약할 성과가 없습니다."));
+			.andExpect(jsonPath("$.data.content").value("아직 성공한 발송이 없어 요약할 성과가 없어요."));
 	}
 
 	@Test

@@ -95,7 +95,7 @@ public class CouponAdminService {
 		}
 		if (d.discountType() == DiscountType.RATE) {
 			if (d.discountValue() > 100) {
-				throw new BusinessException(CommonErrorCode.COMMON_INVALID_INPUT, "정률 할인은 100% 이하입니다.", null);
+				throw new BusinessException(CommonErrorCode.COMMON_INVALID_INPUT, "정률 할인은 100% 이하예요.", null);
 			}
 			if (d.maxDiscountAmount() == null) {
 				throw new BusinessException(CouponErrorCode.COUPON_RATE_CAP_REQUIRED);

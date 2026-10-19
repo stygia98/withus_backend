@@ -98,6 +98,6 @@ public class WorkflowTriggerService {
 			.map(WorkflowStep::getNextStepId)
 			.findFirst()
 			.orElseThrow(() -> new BusinessException(CommonErrorCode.COMMON_INVALID_INPUT,
-				"워크플로우 구조(TRIGGER 노드)가 없습니다.", null));
+				"워크플로우 구조(TRIGGER 노드)가 없어요.", null));
 	}
 }

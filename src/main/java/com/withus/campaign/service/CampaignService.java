@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.regex.Pattern;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -120,7 +121,7 @@ public class CampaignService {
 		Campaign existing = getOrThrow(campaignId);
 		if (existing.getStatus() != CampaignStatus.DRAFT) {
 			throw new BusinessException(CampaignErrorCode.CAMPAIGN_INVALID_STATUS,
-				"DRAFT 상태의 캠페인만 수정할 수 있습니다.", null);
+				"DRAFT 상태의 캠페인만 수정할 수 있어요.", null);
 		}
 		existing.setName(changes.getName());
 		existing.setSegmentId(changes.getSegmentId());
@@ -136,10 +137,38 @@ public class CampaignService {
 		if (campaignMapper.update(existing) == 0) {
 			// 읽은 뒤 시작·예약 요청이 끼어들어 DRAFT 가 아니게 됐다
 			throw new BusinessException(CampaignErrorCode.CAMPAIGN_INVALID_STATUS,
-				"DRAFT 상태의 캠페인만 수정할 수 있습니다.", null);
+				"DRAFT 상태의 캠페인만 수정할 수 있어요.", null);
 		}
 		sendLogMapper.deleteUnstartedCampaignPending(campaignId); // 세그먼트·템플릿이 바뀌었을 수 있어 옛 적재분을 치운다
 		return existing;
+	}
+
+	/**
+	 * DRAFT 캠페인 삭제. 시작·예약했던 캠페인의 발송 이력은 통계와 법규상 기록이라 지우지 않는다 —
+	 * SCHEDULED 는 먼저 예약을 취소해 DRAFT 로 되돌려야 하고, ACTIVE·PAUSED·COMPLETED 는 삭제할 수 없다.
+	 * 워크플로우 노드·A/B 설정은 함께 지워진다(FK CASCADE)
+	 */
+	public void delete(long campaignId) {
+		Campaign campaign = getOrThrow(campaignId);
+		if (campaign.getStatus() != CampaignStatus.DRAFT) {
+			throw new BusinessException(CampaignErrorCode.CAMPAIGN_INVALID_STATUS,
+				"DRAFT 상태의 캠페인만 삭제할 수 있어요. 예약은 먼저 취소하고, 진행·종료된 캠페인은 발송 기록 보존을 위해 삭제할 수 없어요.",
+				null);
+		}
+		sendLogMapper.deleteUnstartedCampaignPending(campaignId); // 시작이 실패해 남은 적재분은 FK 가 막으므로 먼저 치운다
+		int deleted;
+		try {
+			deleted = campaignMapper.deleteDraft(campaignId);
+		} catch (DataIntegrityViolationException e) {
+			// 처리된 발송 기록·워크플로우 인스턴스·AI 리포트가 이 캠페인을 참조한다
+			throw new BusinessException(CampaignErrorCode.CAMPAIGN_INVALID_STATUS,
+				"발송 기록이 있어 삭제할 수 없어요.", null);
+		}
+		if (deleted == 0) {
+			// 읽은 뒤 시작·예약 요청이 끼어들어 DRAFT 가 아니게 됐거나 시작 중이다
+			throw new BusinessException(CampaignErrorCode.CAMPAIGN_INVALID_STATUS,
+				"DRAFT 상태의 캠페인만 삭제할 수 있어요.", null);
+		}
 	}
 
 	/** DB_SCHEMA ck_campaign_type_fields 를 저장 전에 먼저 걸러 친절한 400 으로 돌려준다 */
@@ -147,20 +176,20 @@ public class CampaignService {
 		if (campaign.getType() == CampaignType.ONE_TIME) {
 			if (campaign.getTemplateId() == null) {
 				throw new BusinessException(CommonErrorCode.COMMON_INVALID_INPUT,
-					"일회성 캠페인은 템플릿을 선택해야 합니다.", null);
+					"일회성 캠페인은 템플릿을 선택해야 해요.", null);
 			}
 			if (campaign.getTriggerType() != null) {
 				throw new BusinessException(CommonErrorCode.COMMON_INVALID_INPUT,
-					"일회성 캠페인에는 트리거를 설정할 수 없습니다.", null);
+					"일회성 캠페인에는 트리거를 설정할 수 없어요.", null);
 			}
 		} else {
 			if (campaign.getTriggerType() == null) {
 				throw new BusinessException(CommonErrorCode.COMMON_INVALID_INPUT,
-					"워크플로우 캠페인은 트리거를 선택해야 합니다.", null);
+					"워크플로우 캠페인은 트리거를 선택해야 해요.", null);
 			}
 			if (campaign.getTemplateId() != null || campaign.getCouponId() != null) {
 				throw new BusinessException(CommonErrorCode.COMMON_INVALID_INPUT,
-					"워크플로우 캠페인은 템플릿·쿠폰을 직접 연결하지 않습니다(SEND 노드별로 설정).", null);
+					"워크플로우 캠페인은 템플릿·쿠폰을 직접 연결하지 않아요(SEND 노드별로 설정).", null);
 			}
 		}
 	}
@@ -204,15 +233,15 @@ public class CampaignService {
 		requireOneTime(campaign);
 		if (campaign.getStatus() != CampaignStatus.DRAFT) {
 			throw new BusinessException(CampaignErrorCode.CAMPAIGN_INVALID_STATUS,
-				"DRAFT 상태의 캠페인만 예약할 수 있습니다.", null);
+				"DRAFT 상태의 캠페인만 예약할 수 있어요.", null);
 		}
 		if (!scheduledAt.isAfter(OffsetDateTime.now(clock))) {
-			throw new BusinessException(CommonErrorCode.COMMON_INVALID_INPUT, "예약 시각은 지금보다 뒤여야 합니다.", null);
+			throw new BusinessException(CommonErrorCode.COMMON_INVALID_INPUT, "예약 시각은 지금보다 뒤여야 해요.", null);
 		}
 		checkSendWindowAndCoupon(campaign, scheduledAt);
 		if (campaignMapper.schedule(campaignId, scheduledAt) == 0) {
 			throw new BusinessException(CampaignErrorCode.CAMPAIGN_INVALID_STATUS,
-				"DRAFT 상태의 캠페인만 예약할 수 있습니다.", null);
+				"DRAFT 상태의 캠페인만 예약할 수 있어요.", null);
 		}
 		campaign.setStatus(CampaignStatus.SCHEDULED);
 		campaign.setScheduledAt(scheduledAt);
@@ -224,7 +253,7 @@ public class CampaignService {
 		Campaign campaign = getOrThrow(campaignId);
 		if (campaignMapper.cancelSchedule(campaignId) == 0) {
 			throw new BusinessException(CampaignErrorCode.CAMPAIGN_INVALID_STATUS,
-				"SCHEDULED 상태의 캠페인만 예약을 취소할 수 있습니다.", null);
+				"SCHEDULED 상태의 캠페인만 예약을 취소할 수 있어요.", null);
 		}
 		// 시작이 실패해 남았을 수 있는 적재분을 치운다 — 정리가 start() 에서만 일어나면 다시 시작하지 않는 캠페인의 고아가 남아
 		// claimBatch 가 폴링마다 훑는다(이슈 #53 3번)
@@ -243,7 +272,7 @@ public class CampaignService {
 		// 상태를 먼저 본다 — ACTIVE·COMPLETED 캠페인에 시작을 불러도 시간·쿠폰 검사(422)나 대상 조회 없이 바로 409
 		if (campaign.getStatus() != CampaignStatus.DRAFT && campaign.getStatus() != CampaignStatus.SCHEDULED) {
 			throw new BusinessException(CampaignErrorCode.CAMPAIGN_INVALID_STATUS,
-				"DRAFT·SCHEDULED 상태의 캠페인만 시작할 수 있습니다.", null);
+				"DRAFT·SCHEDULED 상태의 캠페인만 시작할 수 있어요.", null);
 		}
 		// 선점(start_claimed_at): 같은 캠페인을 동시에 시작하는 요청 중 한 명만 통과한다(스케줄러 + 사용자 '지금 시작'). updated_at 은
 		// 건드리지 않는다. 선점 뒤 예약 취소·수정이 끼면 updated_at 이 바뀌어 마지막 전환이 막힌다 — 적재(수 초~분) 동안 락을
@@ -252,7 +281,7 @@ public class CampaignService {
 		OffsetDateTime claimedAt = campaignMapper.claimStart(campaignId, readAt);
 		if (claimedAt == null) {
 			throw new BusinessException(CampaignErrorCode.CAMPAIGN_INVALID_STATUS,
-				"다른 요청이 이 캠페인을 시작·수정하고 있습니다. 잠시 뒤 다시 시도하세요.", null);
+				"다른 요청이 이 캠페인을 시작·수정하고 있어요. 잠시 뒤 다시 시도하세요.", null);
 		}
 		try {
 			startClaimed(campaign, readAt, claimedAt);
@@ -294,18 +323,18 @@ public class CampaignService {
 		}
 		if (campaignMapper.start(campaignId, readAt, claimedAt) == 0) {
 			throw new BusinessException(CampaignErrorCode.CAMPAIGN_INVALID_STATUS,
-				"시작하는 동안 캠페인이 수정되거나 예약이 취소되어 시작하지 않았습니다. 내용을 확인하고 다시 시작하세요.", null);
+				"시작하는 동안 캠페인이 수정되거나 예약이 취소되어 시작하지 않았어요. 내용을 확인하고 다시 시작하세요.", null);
 		}
 	}
 
 	/** ACTIVE → PAUSED. 일시정지 중에는 인스턴스 실행과 PENDING 발송이 멈춘다(PRD 6.6) */
 	public Campaign pause(long campaignId) {
-		return transition(campaignId, CampaignStatus.ACTIVE, CampaignStatus.PAUSED, "ACTIVE 상태의 캠페인만 일시정지할 수 있습니다.");
+		return transition(campaignId, CampaignStatus.ACTIVE, CampaignStatus.PAUSED, "ACTIVE 상태의 캠페인만 일시정지할 수 있어요.");
 	}
 
 	/** PAUSED → ACTIVE. 밀린 건은 다음 주기에 선점돼 바로 처리된다(광고성 시간 제한은 그대로) */
 	public Campaign resume(long campaignId) {
-		return transition(campaignId, CampaignStatus.PAUSED, CampaignStatus.ACTIVE, "PAUSED 상태의 캠페인만 재개할 수 있습니다.");
+		return transition(campaignId, CampaignStatus.PAUSED, CampaignStatus.ACTIVE, "PAUSED 상태의 캠페인만 재개할 수 있어요.");
 	}
 
 	/**
@@ -317,7 +346,7 @@ public class CampaignService {
 		Campaign campaign = getOrThrow(campaignId);
 		if (campaignMapper.completeManually(campaignId) == 0) {
 			throw new BusinessException(CampaignErrorCode.CAMPAIGN_INVALID_STATUS,
-				"ACTIVE·PAUSED 상태의 캠페인만 종료할 수 있습니다.", null);
+				"ACTIVE·PAUSED 상태의 캠페인만 종료할 수 있어요.", null);
 		}
 		workflowInstanceMapper.cancelActiveByCampaign(campaignId);
 		campaign.setStatus(CampaignStatus.COMPLETED);
@@ -325,7 +354,7 @@ public class CampaignService {
 	}
 
 	/**
-	 * 새 DRAFT 로 복제한다(API_SPEC 6장). 템플릿·쿠폰·세그먼트 참조는 그대로 두고, 워크플로우는 노드를 새
+	 * 새 DRAFT 로 복사한다(API_SPEC 6장). 템플릿·쿠폰·세그먼트 참조는 그대로 두고, 워크플로우는 노드를 새
 	 * step_id 로 복사하며 next·yes·no 를 새 ID 로 다시 잇는다. 인스턴스·발송 이력은 복사하지 않는다
 	 */
 	@Transactional
@@ -395,13 +424,13 @@ public class CampaignService {
 
 	private void requireCoupon(Long couponId) {
 		if (couponId != null && !campaignMapper.existsCoupon(couponId)) {
-			throw new BusinessException(CommonErrorCode.COMMON_INVALID_INPUT, "존재하지 않는 쿠폰입니다.", null);
+			throw new BusinessException(CommonErrorCode.COMMON_INVALID_INPUT, "존재하지 않는 쿠폰이에요.", null);
 		}
 	}
 
 	private void requireSegment(Long segmentId) {
 		if (segmentId == null || !campaignMapper.existsSegment(segmentId)) {
-			throw new BusinessException(CommonErrorCode.COMMON_INVALID_INPUT, "존재하지 않는 세그먼트입니다.", null);
+			throw new BusinessException(CommonErrorCode.COMMON_INVALID_INPUT, "존재하지 않는 타겟팅이에요.", null);
 		}
 	}
 
@@ -426,7 +455,7 @@ public class CampaignService {
 
 	private void requireOneTime(Campaign campaign) {
 		if (campaign.getType() != CampaignType.ONE_TIME) {
-			throw new BusinessException(CommonErrorCode.COMMON_INVALID_INPUT, "일회성 캠페인만 지원합니다.", null);
+			throw new BusinessException(CommonErrorCode.COMMON_INVALID_INPUT, "일회성 캠페인만 지원해요.", null);
 		}
 	}
 }

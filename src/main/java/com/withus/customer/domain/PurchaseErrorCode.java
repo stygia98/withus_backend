@@ -10,8 +10,8 @@ import com.withus.common.exception.ErrorCode;
  */
 public enum PurchaseErrorCode implements ErrorCode {
 
-	COUPON_NOT_USABLE(HttpStatus.UNPROCESSABLE_CONTENT, "이 고객이 사용할 수 없는 쿠폰입니다."),
-	COUPON_ALREADY_USED(HttpStatus.CONFLICT, "이미 사용된 쿠폰입니다.");
+	COUPON_NOT_USABLE(HttpStatus.UNPROCESSABLE_CONTENT, "이 고객이 사용할 수 없는 쿠폰이에요."),
+	COUPON_ALREADY_USED(HttpStatus.CONFLICT, "이미 사용된 쿠폰이에요.");
 
 	private final HttpStatus status;
 	private final String message;

@@ -8,7 +8,7 @@ import com.withus.common.exception.ErrorCode;
 public enum WorkflowErrorCode implements ErrorCode {
 
 	/** 저장 시 구조 검증 실패 (PRD 6.4). details 에 실패한 검사 메시지 목록 */
-	WORKFLOW_INVALID_STRUCTURE(HttpStatus.BAD_REQUEST, "워크플로우 구조가 올바르지 않습니다.");
+	WORKFLOW_INVALID_STRUCTURE(HttpStatus.BAD_REQUEST, "워크플로우 구조가 올바르지 않아요.");
 
 	private final HttpStatus status;
 	private final String message;

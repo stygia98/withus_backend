@@ -65,4 +65,11 @@
 		    refresh_token_hash = NULL, updated_at = now()
 		WHERE member_id = #{memberId}
 	</update>
+
+	<update id="updatePassword">
+		UPDATE member
+		SET password = #{password}, refresh_token_hash = NULL, failed_login_count = 0, locked_until = NULL,
+		    updated_at = now()
+		WHERE member_id = #{memberId}
+	</update>
 </mapper>

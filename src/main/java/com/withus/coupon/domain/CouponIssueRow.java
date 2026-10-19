@@ -10,6 +10,10 @@ import lombok.Getter;
 public class CouponIssueRow {
 
 	private Long issueId;
+	/** 매장 바코드에 담는 12자리 숫자 쿠폰 번호 (V31). URL 토큰과 따로 둔다 */
+	private String code;
+	/** 고객 쿠폰 페이지(/c/{token}) 주소용 UUID 문자열. 관리자 발급 목록 링크에 쓴다 */
+	private String token;
 	private Long couponId;
 	private Long customerId;
 	/** 이름이 없는 고객이면 null */
