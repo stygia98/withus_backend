@@ -32,9 +32,8 @@ public class CampaignReportService {
 	private static final Logger log = LoggerFactory.getLogger(CampaignReportService.class);
 
 	static final int MAX_SENTENCES = 5;
-	/** 성공 발송이 없으면 요약할 성과가 없으므로 LLM 을 부르지 않는다 (무료 등급 한도 절약) */
-	static final String NO_LLM_MODEL = "none";
-	static final String NO_DATA_CONTENT = "아직 성공한 발송이 없어 요약할 성과가 없어요.";
+	/** 캠페인별로 남기는 요약 이력 수. 화면은 최근 1건만 보여 준다 */
+	static final int MAX_HISTORY = 10;
 
 	private static final String SYSTEM_INSTRUCTION = """
 		당신은 CRM 마케팅 성과 분석가다. 주어진 캠페인 집계 지표(JSON)를 관리자에게 보고하는 한국어 요약을 쓴다.
@@ -58,30 +57,29 @@ public class CampaignReportService {
 		this.objectMapper = objectMapper;
 	}
 
-	/** 생성·재생성 모두 새 요약을 만든다. 없는 캠페인은 COMMON_NOT_FOUND(404) */
+	/**
+	 * 생성·재생성 모두 새 요약을 만들고 캠페인별 최근 {@value #MAX_HISTORY}건만 남긴다. 없는 캠페인은 COMMON_NOT_FOUND(404).
+	 * 성공 발송이 없으면 요약할 성과가 없어 LLM 을 부르지 않고(무료 등급 한도 절약) 저장도 하지 않는다 — AI_NO_SENT_DATA(422)
+	 */
 	public CampaignReportResponse generate(long campaignId) {
 		CampaignAnalyticsResponse analytics = dashboardService.campaign(campaignId);
+		if (analytics.kpi().sent() == 0) {
+			throw new BusinessException(AiErrorCode.AI_NO_SENT_DATA);
+		}
 		String inputJson = objectMapper.writeValueAsString(input(analytics));
 
-		String content;
-		String model;
-		if (analytics.kpi().sent() == 0) {
-			content = NO_DATA_CONTENT;
-			model = NO_LLM_MODEL;
-		} else {
-			LlmResponse response = llmClient.generate(new LlmRequest(SYSTEM_INSTRUCTION, inputJson, false, 0.3, 1024,
-				mockSummary(analytics)));
-			if (response.truncated()) {
-				log.warn("AI-03 요약이 출력 한도에서 잘렸습니다 model={}", response.model());
-				throw new BusinessException(AiErrorCode.AI_UNAVAILABLE);
-			}
-			content = limitSentences(response.text());
-			if (content.isEmpty()) {
-				throw new BusinessException(AiErrorCode.AI_UNAVAILABLE);
-			}
-			model = response.model();
+		LlmResponse response = llmClient.generate(new LlmRequest(SYSTEM_INSTRUCTION, inputJson, false, 0.3, 1024,
+			mockSummary(analytics)));
+		if (response.truncated()) {
+			log.warn("AI-03 요약이 출력 한도에서 잘렸습니다 model={}", response.model());
+			throw new BusinessException(AiErrorCode.AI_UNAVAILABLE);
 		}
-		aiReportMapper.insert(campaignId, AiReport.CAMPAIGN_SUMMARY, inputJson, content, model);
+		String content = limitSentences(response.text());
+		if (content.isEmpty()) {
+			throw new BusinessException(AiErrorCode.AI_UNAVAILABLE);
+		}
+		aiReportMapper.insertKeepingLatest(campaignId, AiReport.CAMPAIGN_SUMMARY, inputJson, content, response.model(),
+			MAX_HISTORY);
 		return latest(campaignId);
 	}
 

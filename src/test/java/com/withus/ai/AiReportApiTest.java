@@ -118,13 +118,41 @@ class AiReportApiTest {
 	}
 
 	@Test
-	void 성공_발송이_없으면_LLM_없이_안내_문장을_저장한다() throws Exception {
+	void 성공_발송이_없으면_LLM도_저장도_없이_422() throws Exception {
 		long campaignId = campaign("아직 안 보냄");
 
 		mvc.perform(post("/api/v1/ai/reports/campaigns/" + campaignId).with(auth(Role.MANAGER)).with(csrf))
-			.andExpect(status().isOk())
-			.andExpect(jsonPath("$.data.model").value("none"))
-			.andExpect(jsonPath("$.data.content").value("아직 성공한 발송이 없어 요약할 성과가 없어요."));
+			.andExpect(status().isUnprocessableEntity())
+			.andExpect(jsonPath("$.error.code").value("AI_NO_SENT_DATA"))
+			.andExpect(jsonPath("$.error.message").value("아직 성공한 발송이 없어 요약할 성과가 없어요."));
+
+		assertThat(jdbc.queryForObject("SELECT count(*) FROM ai_report WHERE campaign_id = ?", Long.class, campaignId))
+			.isZero();
+	}
+
+	@Test
+	void 이력은_캠페인별_최근_10건만_남는다() throws Exception {
+		long campaignId = campaign("이력 상한");
+		long otherId = campaign("다른 캠페인");
+		sentWithOpen(campaignId);
+		sentWithOpen(otherId);
+		mvc.perform(post("/api/v1/ai/reports/campaigns/" + otherId).with(auth(Role.OWNER)).with(csrf))
+			.andExpect(status().isOk());
+
+		for (int i = 0; i < 11; i++) {
+			mvc.perform(post("/api/v1/ai/reports/campaigns/" + campaignId).with(auth(Role.OWNER)).with(csrf))
+				.andExpect(status().isOk());
+		}
+
+		List<Long> ids = jdbc.queryForList("SELECT report_id FROM ai_report WHERE campaign_id = ? ORDER BY report_id",
+			Long.class, campaignId);
+		assertThat(ids).hasSize(10);
+		// 가장 오래된 1건이 지워지고, GET 은 마지막에 만든 것을 돌려준다
+		mvc.perform(get("/api/v1/ai/reports/campaigns/" + campaignId).with(auth(Role.MANAGER)))
+			.andExpect(jsonPath("$.data.reportId").value(ids.get(ids.size() - 1)));
+		// 다른 캠페인의 이력은 건드리지 않는다
+		assertThat(jdbc.queryForObject("SELECT count(*) FROM ai_report WHERE campaign_id = ?", Long.class, otherId))
+			.isEqualTo(1L);
 	}
 
 	@Test

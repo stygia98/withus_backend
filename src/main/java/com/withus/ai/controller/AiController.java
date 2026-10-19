@@ -64,7 +64,8 @@ public class AiController {
 	}
 
 	@Operation(summary = "AI-03 캠페인 성과 요약 생성·재생성",
-		description = "집계 지표만 Gemini 에 보내 5문장 이내 요약을 ai_report 에 새로 저장한다. 성공 발송이 없으면 LLM 없이 안내 문장.")
+		description = "집계 지표만 Gemini 에 보내 5문장 이내 요약을 ai_report 에 새로 저장한다(캠페인별 최근 10건만 남김). "
+			+ "성공 발송이 없으면 LLM 을 부르지 않고 저장하지도 않는다 — AI_NO_SENT_DATA(422).")
 	@PreAuthorize("hasAnyRole('OWNER','MANAGER')")
 	@PostMapping("/reports/campaigns/{campaignId}")
 	public ApiResponse<CampaignReportResponse> generateReport(@PathVariable long campaignId) {
