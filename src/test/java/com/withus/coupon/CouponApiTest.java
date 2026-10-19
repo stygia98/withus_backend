@@ -199,7 +199,8 @@ class CouponApiTest {
 			.andExpect(jsonPath("$.data.totalElements").value(1))
 			.andExpect(jsonPath("$.data.content[0].customerName").value("김민지"))
 			.andExpect(jsonPath("$.data.content[0].status").value("USABLE"))
-			.andExpect(jsonPath("$.data.content[0].token").doesNotExist());
+			.andExpect(jsonPath("$.data.content[0].code").isString())
+			.andExpect(jsonPath("$.data.content[0].token").isString());
 
 		mvc.perform(get("/api/v1/customers/" + customerId + "/coupon-issues").cookie(access))
 			.andExpect(jsonPath("$.data.length()").value(2));
