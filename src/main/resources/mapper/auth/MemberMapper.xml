@@ -3,11 +3,11 @@
 <mapper namespace="com.withus.auth.mapper.MemberMapper">
 
 	<sql id="columns">
-		member_id, email, password, name, role, active_yn, refresh_token_hash, failed_login_count, locked_until
+		member_id, email, password, name, role, active_yn, refresh_token_hash, failed_login_count, locked_until, deleted_at
 	</sql>
 
 	<select id="findByEmail" resultType="com.withus.auth.domain.Member">
-		SELECT <include refid="columns"/> FROM member WHERE email = #{email}
+		SELECT <include refid="columns"/> FROM member WHERE email = #{email} AND deleted_at IS NULL
 	</select>
 
 	<select id="findById" resultType="com.withus.auth.domain.Member">
@@ -19,7 +19,7 @@
 	</select>
 
 	<select id="existsOwner" resultType="boolean">
-		SELECT EXISTS (SELECT 1 FROM member WHERE role = 'OWNER')
+		SELECT EXISTS (SELECT 1 FROM member WHERE role = 'OWNER' AND deleted_at IS NULL)
 	</select>
 
 	<insert id="insert" useGeneratedKeys="true" keyProperty="memberId" keyColumn="member_id">
@@ -51,25 +51,47 @@
 		UPDATE member SET refresh_token_hash = NULL, updated_at = now() WHERE member_id = #{memberId}
 	</update>
 
+	<!-- 사용자 관리 목록: 삭제한 계정은 빼고, 삭제된 계정 목록은 따로 본다 -->
 	<select id="findAll" resultType="com.withus.auth.domain.Member">
-		SELECT <include refid="columns"/> FROM member ORDER BY member_id
+		SELECT <include refid="columns"/> FROM member WHERE deleted_at IS NULL ORDER BY member_id
 	</select>
 
+	<select id="findDeleted" resultType="com.withus.auth.domain.Member">
+		SELECT <include refid="columns"/> FROM member WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC
+	</select>
+
+	<!-- 삭제되지 않은 계정 중 같은 이메일이 있는가. exceptMemberId 는 수정할 때 자기 자신을 뺀다 -->
 	<select id="existsEmail" resultType="boolean">
-		SELECT EXISTS (SELECT 1 FROM member WHERE email = #{email})
+		SELECT EXISTS (SELECT 1 FROM member WHERE email = #{email} AND deleted_at IS NULL
+		<if test="exceptMemberId != null">AND member_id &lt;&gt; #{exceptMemberId}</if>)
 	</select>
 
-	<update id="updateRoleAndActive">
+	<!-- 보내지 않은 값(null)은 그대로 둔다. 역할·활성 여부가 바뀌면 Refresh 토큰을 지워 새 값이 반영되게 한다 -->
+	<update id="updateMember">
 		UPDATE member
-		SET role = COALESCE(#{role}, role), active_yn = COALESCE(#{activeYn}, active_yn),
-		    refresh_token_hash = NULL, updated_at = now()
-		WHERE member_id = #{memberId}
+		SET name = COALESCE(#{name}, name), email = COALESCE(#{email}, email),
+		    role = COALESCE(#{role}, role), active_yn = COALESCE(#{activeYn}, active_yn),
+		    <if test="role != null or activeYn != null">refresh_token_hash = NULL,</if>
+		    updated_at = now()
+		WHERE member_id = #{memberId} AND deleted_at IS NULL
+	</update>
+
+	<!-- 삭제 표시: 로그인을 끊고 목록에서 뺀다. 이름·이메일·비밀번호·역할은 남긴다 -->
+	<update id="markDeleted">
+		UPDATE member SET deleted_at = now(), refresh_token_hash = NULL, updated_at = now()
+		WHERE member_id = #{memberId} AND deleted_at IS NULL
+	</update>
+
+	<!-- 복구: 같은 이메일의 계정이 다시 생겼으면 uq_member_email_active 가 막는다 -->
+	<update id="restore">
+		UPDATE member SET deleted_at = NULL, failed_login_count = 0, locked_until = NULL, updated_at = now()
+		WHERE member_id = #{memberId} AND deleted_at IS NOT NULL
 	</update>
 
 	<update id="updatePassword">
 		UPDATE member
 		SET password = #{password}, refresh_token_hash = NULL, failed_login_count = 0, locked_until = NULL,
 		    updated_at = now()
-		WHERE member_id = #{memberId}
+		WHERE member_id = #{memberId} AND deleted_at IS NULL
 	</update>
 </mapper>

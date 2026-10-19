@@ -20,7 +20,8 @@ public enum AuthErrorCode implements ErrorCode {
 	// 사용자 관리 (API_SPEC 2장)
 	MEMBER_DUPLICATE_EMAIL(HttpStatus.CONFLICT, "이미 등록된 이메일이에요."),
 	MEMBER_SELF_CHANGE(HttpStatus.BAD_REQUEST, "자기 계정의 역할·활성 여부는 바꿀 수 없어요."),
-	MEMBER_SELF_PASSWORD(HttpStatus.BAD_REQUEST, "자기 계정의 비밀번호는 '비밀번호 변경'에서 바꿔 주세요.");
+	MEMBER_SELF_PASSWORD(HttpStatus.BAD_REQUEST, "자기 계정의 비밀번호는 '비밀번호 변경'에서 바꿔 주세요."),
+	MEMBER_SELF_DELETE(HttpStatus.BAD_REQUEST, "자기 계정은 삭제할 수 없어요.");
 
 	private final HttpStatus status;
 	private final String message;
