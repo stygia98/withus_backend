@@ -1,11 +1,13 @@
 package com.withus.ai;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.core.env.Environment;
 
 import com.withus.ai.service.GeminiLlmClient;
 import com.withus.ai.service.LlmClient;
@@ -20,9 +22,14 @@ class AiConfigTest {
 
 		@Autowired
 		LlmClient llmClient;
+		@Autowired
+		Environment environment;
 
 		@Test
 		void local_프로필_기본값은_Mock이다() {
+			// infra/.env 에 WITHUS_AI_TYPE 을 넣어 실제 Gemini 를 쓰는 PC 에서는 '기본값'을 검사할 수 없으므로 건너뛴다
+			assumeTrue(environment.getProperty("WITHUS_AI_TYPE") == null,
+				"WITHUS_AI_TYPE 이 설정돼 있어 기본값 검사를 건너뜀");
 			assertThat(llmClient).isInstanceOf(MockLlmClient.class);
 		}
 	}
