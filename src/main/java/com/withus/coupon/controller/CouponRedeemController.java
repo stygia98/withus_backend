@@ -14,11 +14,14 @@ import com.withus.coupon.service.CouponRedeemService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 
-/** 권한표 PRD 3장 '구매 등록·쿠폰 사용 처리': OWNER·MANAGER. STAFF 는 403 */
-@Tag(name = "쿠폰 사용 처리 (매장)", description = "바코드 쿠폰 번호로 조회·사용 처리 (API_SPEC 8장, project #51)")
+/**
+ * 권한표 PRD 3장 '쿠폰 사용 처리(매장 바코드)': OWNER·MANAGER·STAFF (2026-10-19 매장 직원도 처리하도록 STAFF 추가).
+ * 금액·누적구매액이 바뀌는 구매 등록(고객 상세)은 그대로 OWNER·MANAGER 만이다
+ */
+@Tag(name = "쿠폰 사용 처리 (매장)", description = "바코드 쿠폰 번호로 조회·사용 처리·취소 (API_SPEC 8장, project #51). 권한 O M S")
 @RestController
 @RequestMapping("/api/v1/coupon-issues/by-code/{code}")
-@PreAuthorize("hasAnyRole('OWNER','MANAGER')")
+@PreAuthorize("hasAnyRole('OWNER','MANAGER','STAFF')")
 public class CouponRedeemController {
 
 	private final CouponRedeemService couponRedeemService;

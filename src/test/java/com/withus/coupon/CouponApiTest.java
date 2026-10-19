@@ -354,15 +354,26 @@ class CouponApiTest {
 	}
 
 	@Test
-	void STAFF와_로그인하지_않은_요청은_사용_처리할_수_없다() throws Exception {
+	void 로그인하지_않은_요청은_사용_처리할_수_없다() throws Exception {
 		long couponId = createCoupon(body("AMOUNT", 5000, null, TODAY, TODAY.plusDays(30)));
 		String code = codeOf(issue(couponId, customer("윤")));
 
-		redeem(code, login(Role.STAFF)).andExpect(status().isForbidden());
 		mvc.perform(post("/api/v1/coupon-issues/by-code/" + code + "/use").cookie(xsrf)
 			.header("X-XSRF-TOKEN", xsrf.getValue())).andExpect(status().isUnauthorized());
 		assertThat(jdbc.queryForObject("SELECT used_at IS NULL FROM coupon_issue WHERE code = ?", Boolean.class, code))
 			.isTrue();
+	}
+
+	@Test
+	void STAFF도_매장_바코드로_조회하고_사용_처리할_수_있다() throws Exception {
+		long couponId = createCoupon(body("AMOUNT", 5000, null, TODAY, TODAY.plusDays(30)));
+		String code = codeOf(issue(couponId, customer("윤")));
+		Cookie staff = login(Role.STAFF);
+
+		mvc.perform(get("/api/v1/coupon-issues/by-code/" + code).cookie(staff))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.data.status").value("USABLE"));
+		redeem(code, staff).andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("USED"));
 	}
 
 	// ---- 매장 바코드 사용 취소 ----
@@ -411,12 +422,13 @@ class CouponApiTest {
 	}
 
 	@Test
-	void STAFF는_사용_취소할_수_없고_없는_번호는_404() throws Exception {
+	void STAFF도_잘못_찍은_사용을_취소할_수_있고_없는_번호는_404() throws Exception {
 		long couponId = createCoupon(body("AMOUNT", 5000, null, TODAY, TODAY.plusDays(30)));
 		String code = codeOf(issue(couponId, customer("류")));
 		redeem(code, access).andExpect(status().isOk());
 
-		cancelUse(code, login(Role.STAFF)).andExpect(status().isForbidden());
+		cancelUse(code, login(Role.STAFF)).andExpect(status().isOk())
+			.andExpect(jsonPath("$.data.status").value("USABLE"));
 		cancelUse("000000000000", access).andExpect(status().isNotFound());
 	}
 }
