@@ -84,7 +84,8 @@ class AiCampaignPlanApiTest {
 				.andExpect(jsonPath("$.data.plan.coupon.discountType").value("RATE"))
 				.andExpect(jsonPath("$.data.plan.coupon.validFrom").value(TODAY.toString()))
 				.andExpect(jsonPath("$.data.plan.coupon.validTo").value(TODAY.plusDays(6).toString()))
-				.andExpect(jsonPath("$.data.target.total").isNumber());
+				.andExpect(jsonPath("$.data.target.total").isNumber())
+				.andExpect(jsonPath("$.data.unsupported").isArray());
 
 			assertThat(jdbc.queryForObject("SELECT count(*) FROM segment", Long.class)).isEqualTo(segmentsBefore);
 		}

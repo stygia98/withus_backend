@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.LocalDate;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -84,6 +85,57 @@ class CampaignPlanServiceTest {
 			"[{\"field\":\"region\",\"op\":\"IN\",\"value\":[\"서울\",\"경기도\",\"BUSAN\"]}]", "null"));
 		assertThat(p.segment().rule().toString())
 			.contains("{\"field\":\"region\",\"op\":\"IN\",\"value\":[\"SEOUL\",\"GYEONGGI\",\"BUSAN\"]}");
+	}
+
+	@Test
+	void 오늘_가입을_0일로_보내면_1일로_바꾸고_다른_범위_밖_값은_AI_UNAVAILABLE() {
+		CampaignPlan p = toPlan(plan("EMAIL", "[{\"field\":\"joinedAt\",\"op\":\"IN_LAST_DAYS\",\"value\":0}]", "null"));
+		assertThat(p.segment().rule().toString())
+			.contains("{\"field\":\"joinedAt\",\"op\":\"IN_LAST_DAYS\",\"value\":1}");
+
+		assertUnavailable(plan("EMAIL", "[{\"field\":\"joinedAt\",\"op\":\"IN_LAST_DAYS\",\"value\":-1}]", "null"));
+		assertUnavailable(plan("EMAIL", "[{\"field\":\"joinedAt\",\"op\":\"IN_LAST_DAYS\",\"value\":3651}]", "null"));
+	}
+
+	@Test
+	void 형식만_다른_값은_규칙_형식으로_맞춘다() {
+		CampaignPlan p = toPlan(plan("EMAIL", """
+			[{"field":"age","op":"between","value":["20","29"]},
+			 {"field":"totalPurchase","op":"GTE","value":"100,000"},
+			 {"field":"region","op":"EQ","value":["서울","인천"]},
+			 {"field":"dormant","op":"EQ","value":false},
+			 {"field":"emailConsent","op":"EQ","value":"y"}]""", "null"));
+		assertThat(p.segment().rule().toString()).isEqualTo("{\"operator\":\"AND\",\"groups\":[{\"operator\":\"AND\",\"conditions\":["
+			+ "{\"field\":\"age\",\"op\":\"BETWEEN\",\"value\":[20,29]},"
+			+ "{\"field\":\"totalPurchase\",\"op\":\"GTE\",\"value\":100000},"
+			+ "{\"field\":\"region\",\"op\":\"IN\",\"value\":[\"SEOUL\",\"INCHEON\"]},"
+			+ "{\"field\":\"dormant\",\"op\":\"EQ\",\"value\":\"N\"},"
+			+ "{\"field\":\"emailConsent\",\"op\":\"EQ\",\"value\":\"Y\"}]}]}");
+
+		assertThat(toPlan(plan("EMAIL", "[{\"field\":\"region\",\"op\":\"IN\",\"value\":\"부산\"}]", "null"))
+			.segment().rule().toString()).contains("{\"field\":\"region\",\"op\":\"IN\",\"value\":[\"BUSAN\"]}");
+		assertThat(toPlan(plan("EMAIL", "[{\"field\":\"region\",\"op\":\"EQ\",\"value\":[\"부산\"]}]", "null"))
+			.segment().rule().toString()).contains("{\"field\":\"region\",\"op\":\"EQ\",\"value\":\"BUSAN\"}");
+		// 뜻을 알 수 없는 값은 고치지 않는다
+		assertUnavailable(plan("EMAIL", "[{\"field\":\"age\",\"op\":\"GTE\",\"value\":\"삼십\"}]", "null"));
+		assertUnavailable(plan("EMAIL", "[{\"field\":\"dormant\",\"op\":\"EQ\",\"value\":\"maybe\"}]", "null"));
+	}
+
+	@Test
+	void 반영하지_못한_조건은_한_줄로_정리하고_빈값_중복을_빼고_개수와_길이를_자른다() {
+		assertThat(CampaignPlanService.unsupported(null)).isEmpty();
+		assertThat(CampaignPlanService.unsupported(Arrays.asList(" 생일 ", "성별\n(여성)", "", null, "생일")))
+			.containsExactly("생일", "성별 (여성)");
+		assertThat(CampaignPlanService.unsupported(List.of("가".repeat(50), "1", "2", "3", "4", "5")))
+			.hasSize(CampaignPlanService.UNSUPPORTED_MAX_COUNT)
+			.first().asString().hasSize(CampaignPlanService.UNSUPPORTED_MAX_LENGTH);
+	}
+
+	@Test
+	void 프롬프트에_오늘과_어제_올해_작년을_코드가_계산해_넣는다() {
+		String system = CampaignPlanService.systemInstruction(LocalDate.of(2026, 1, 1));
+		assertThat(system).contains("오늘은 2026-01-01 이다(어제 2025-12-31, 올해 2026년, 작년 2025년)")
+			.contains("퍼센트(%)");
 	}
 
 	@Test
